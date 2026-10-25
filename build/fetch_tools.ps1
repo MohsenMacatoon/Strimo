@@ -32,7 +32,7 @@ if (-not ((Test-Path vendor\libmpv-2.dll) -or (Test-Path vendor\mpv-2.dll))) {
 }
 
 # python-mpv looks for libmpv-2.dll on new versions and mpv-2.dll on older ones
-$mpvpy = (python -c "import mpv; print(mpv.__file__)").Trim()
+      $mpvpy = (python -c "import importlib.util; print(importlib.util.find_spec('mpv').origin)").Trim()
 if ((Test-Path vendor\libmpv-2.dll) -and -not (Select-String -Path $mpvpy -Pattern 'libmpv-2.dll' -Quiet)) {
     Write-Host 'python-mpv expects mpv-2.dll - renaming'
     Move-Item -Force vendor\libmpv-2.dll vendor\mpv-2.dll
