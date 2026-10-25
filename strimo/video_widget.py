@@ -163,7 +163,7 @@ class GLVideoWidget(_MouseForwarder, _PlaceholderState, QOpenGLWidget):
         self._get_proc = None
         self._proc_cb = None
         self.frame_ready.connect(self._repaint, Qt.ConnectionType.QueuedConnection)
-        self.aboutToBeDestroyed.connect(self.free_context)
+        self._watched_context = None
 
     def attach(self, player) -> None:
         self.player = player
@@ -180,6 +180,14 @@ class GLVideoWidget(_MouseForwarder, _PlaceholderState, QOpenGLWidget):
     def initializeGL(self):
         if self.player is None:
             return
+        # free mpv's renderer before Qt destroys this GL context (e.g. window re-created)
+        try:
+            glctx = self.context()
+            if glctx is not None and glctx is not self._watched_context:
+                glctx.aboutToBeDestroyed.connect(self.free_context)
+                self._watched_context = glctx
+        except Exception as exc:  # noqa: BLE001
+            LOG.write(f"could not watch GL context: {exc}")
         try:
             import mpv
 
