@@ -1,0 +1,77 @@
+name: Build Strimo for Windows
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python packages
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-build.txt
+
+      - name: Logic tests
+        run: python tests/test_logic.py
+
+      - name: Download mpv engine, yt-dlp and FFmpeg
+        shell: pwsh
+        run: ./build/fetch_tools.ps1
+
+      - name: Build Strimo.exe
+        run: pyinstaller --noconfirm strimo.spec
+
+      - name: Self-test on Windows (real window, real mpv)
+        shell: pwsh
+        run: ./build/selftest.ps1
+
+      - name: Build installers
+        shell: pwsh
+        run: ./build/make_installers.ps1
+
+      - name: Upload full installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Strimo-Setup (full - HD downloads and MP3)
+          path: |
+            output/Strimo-Setup-*.exe
+            !output/*-Lite.exe
+          compression-level: 0
+
+      - name: Upload lite installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Strimo-Setup-Lite (smaller - no FFmpeg)
+          path: output/Strimo-Setup-*-Lite.exe
+          compression-level: 0
+
+      - name: Upload self-test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: selftest-report
+          path: |
+            selftest/report.txt
+          if-no-files-found: ignore
+
+      - name: Publish release (when a v* tag is pushed)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: output/*.exe
