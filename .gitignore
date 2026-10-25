@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+build/*/
+!build/*.ps1
+dist/
+output/
+vendor/
+selftest/
+*.spec.bak

@@ -1,0 +1,15 @@
+Strimo bundles the following open-source software:
+
+- mpv / libmpv (playback engine) — https://mpv.io — GPLv2+ / LGPLv2.1+ (Windows builds by shinchiro/mpv-winbuild-cmake include GPL components)
+- FFmpeg (inside libmpv, and ffmpeg.exe in the full installer) — https://ffmpeg.org — GPL builds
+- yt-dlp — https://github.com/yt-dlp/yt-dlp — The Unlicense
+- Qt 6 / PySide6 — https://www.qt.io — LGPLv3
+- python-mpv — https://github.com/jaseg/python-mpv — LGPLv2.1+ / GPLv2+
+- Python — https://www.python.org — PSF License
+
+Because GPL components are included, if you publish Strimo builds to other people you must
+also make Strimo's source code available under GPL-compatible terms (for example by keeping
+this repository public). For personal use there is nothing to do.
+
+Downloading videos: only download content you have the right to save (your own videos,
+Creative Commons, material the owner allows). Many sites' terms forbid downloading.
