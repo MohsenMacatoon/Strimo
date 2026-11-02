@@ -23,7 +23,7 @@ To get a permanent download link, create a tag/release named `v1.0.0` (Releases 
 
 ## Option B — build on your own PC
 
-Uses about 250 MB of internet data (Python packages, mpv engine, FFmpeg, Inno Setup).
+Uses about 250 MB of internet data (Python packages, VLC engine, FFmpeg, Inno Setup).
 
 1. Install **Python 3.12** from python.org (tick *Add python.exe to PATH*), **7-Zip** and **Inno Setup 6**.
 2. In the Strimo folder: Shift + right-click → *Open PowerShell window here*, then:

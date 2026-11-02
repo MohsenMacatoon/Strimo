@@ -418,7 +418,7 @@ class IntroSkipDialog(QDialog):
 
 # ============================================================== Settings
 class SettingsDialog(QDialog):
-    RESTART_KEYS = {"video_backend", "hwdec", "cache_mb", "readahead_secs"}
+    RESTART_KEYS = {"hwdec", "network_cache_s", "pitch_correction"}
 
     def __init__(self, cfg, parent=None):
         super().__init__(parent)
@@ -446,17 +446,15 @@ class SettingsDialog(QDialog):
         self._check(f, "remember_speed", "Remember the speed for each file")
         self._check(f, "hold_to_boost", "Hold → to play faster (like YouTube)")
         self._dspin(f, "boost_speed", "Hold-→ speed", 1.25, 8.0, 0.25, "×")
-        self._check(f, "pitch_correction", "Keep voices natural when changing speed")
+        self._check(f, "pitch_correction", "Keep voices natural when changing speed (after restart)")
         tabs.addTab(w, "Playback")
 
         # Links & downloads
         w, f = page()
         self._combo(f, "stream_quality", "Streaming quality", ytdl.STREAM_QUALITIES)
         self._combo(f, "download_quality", "Download quality", ytdl.QUALITIES)
-        self._spin(f, "cache_mb", "Buffer size", 20, 2000, " MB",
-                   "Bigger = smoother playback on slow or unstable internet")
-        self._spin(f, "readahead_secs", "Preload ahead", 5, 3600, " s",
-                   "How many seconds of video to load ahead of the current spot")
+        self._spin(f, "network_cache_s", "Link buffer", 1, 30, " s",
+                   "How much of a link to load before playing. Raise it on slow or unstable internet.")
         self._check(f, "download_subs", "Download subtitles by default")
         self._line(f, "sub_langs", "Subtitle languages", "e.g. en.*  or  en.*,fil  or  all")
         self._check(f, "show_thumbnails", "Show thumbnails when checking links")
@@ -485,9 +483,6 @@ class SettingsDialog(QDialog):
         # Advanced
         w, f = page()
         self._check(f, "hwdec", "Hardware decoding (uses the graphics card, saves battery)")
-        self._combo(f, "video_backend", "Video output",
-                    [("opengl", "Standard (OpenGL)"), ("native", "Compatibility")],
-                    "Try Compatibility if the picture stays black")
         log_btn = QPushButton("Open log file")
         log_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(paths.log_path())))
         f.addRow("Troubleshooting", log_btn)
@@ -496,7 +491,7 @@ class SettingsDialog(QDialog):
         f.addRow("", data_btn)
         tabs.addTab(w, "Advanced")
 
-        note = QLabel("Buffer, hardware decoding and video output changes apply after restarting Strimo.")
+        note = QLabel("Link buffer, hardware decoding and pitch changes apply after restarting Strimo.")
         note.setObjectName("dim")
         note.setWordWrap(True)
         lay.addWidget(note)

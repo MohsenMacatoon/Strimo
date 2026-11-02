@@ -27,7 +27,7 @@ from .util import (
     ASPECT_CHOICES, MEDIA_EXTS, display_name, fmt_speed, fmt_time, folder_media_files, is_direct_media_url, is_media_file,
     is_sub_file, is_url, normalize_url, parse_time, safe_filename, unique_path,
 )
-from .video_widget import GLVideoWidget, NativeVideoWidget, NullVideoWidget
+from .video_widget import NativeVideoWidget, NullVideoWidget
 
 TAB_PLAYLIST, TAB_BOOKMARKS, TAB_NOTES, TAB_DOWNLOADS, TAB_ADJUST, TAB_INFO = range(6)
 HIDE_DELAY_MS = 2500
@@ -80,7 +80,6 @@ class MainWindow(QMainWindow):
         self._drag_offset = None
         self._dragged = False
         self._ignore_release = False
-        self._frame_osd = False
         self._gl_check_timer = None
         self._runners = []
 
@@ -96,7 +95,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
 
         self._build_panels()
-        self._build_video(cfg.get("video_backend"))
+        self._build_video("native")
         self._connect_controls()
         self._build_actions()
         self._build_menus()
@@ -114,6 +113,10 @@ class MainWindow(QMainWindow):
         self.save_timer.setInterval(10_000)
         self.save_timer.timeout.connect(self._periodic_save)
         self.save_timer.start()
+        self.poll_timer = QTimer(self)
+        self.poll_timer.setInterval(200)
+        self.poll_timer.timeout.connect(self._poll)
+        self.poll_timer.start()
         self.sleep_timer = QTimer(self)
         self.sleep_timer.setInterval(1000)
         self.sleep_timer.timeout.connect(self._sleep_tick)
@@ -191,7 +194,7 @@ class MainWindow(QMainWindow):
         self.info_panel.refresh_requested.connect(self.refresh_info)
 
     def _build_video(self, backend: str) -> None:
-        """Create (or re-create) the video widget and the mpv player."""
+        """Create (or re-create) the video widget and the VLC player."""
         if self.player is not None:
             self.player.terminate()
             self.player = None
@@ -206,15 +209,10 @@ class MainWindow(QMainWindow):
             video = NullVideoWidget(self)
             self.central_layout.insertWidget(0, video, 1)
             player = Player(self.cfg, "native", null_output=True)
-        elif backend == "native":
+        else:
             video = NativeVideoWidget(self)
             self.central_layout.insertWidget(0, video, 1)
             player = Player(self.cfg, "native", wid=video.wid())
-        else:
-            video = GLVideoWidget(self)
-            self.central_layout.insertWidget(0, video, 1)
-            player = Player(self.cfg, "opengl")
-            video.gl_failed.connect(self._gl_failed)
         video.attach(player)
         self.video = video
         self.player = player
@@ -273,8 +271,8 @@ class MainWindow(QMainWindow):
         self.act_shots_folder = A("Open screenshots folder", self.open_screenshot_folder)
         self.act_quit = A("Exit", self.close, "Ctrl+Q")
 
-        self.act_play = A("Play / Pause", self.toggle_pause,
-                          ["Space", QKeySequence(QKeyCombination(Qt.Key.Key_MediaTogglePlayPause)), QKeySequence(QKeyCombination(Qt.Key.Key_MediaPlay))],
+        self.act_play = A("Play / Pause\tSpace", self.toggle_pause,
+                          [QKeySequence(QKeyCombination(Qt.Key.Key_MediaTogglePlayPause)), QKeySequence(QKeyCombination(Qt.Key.Key_MediaPlay))],
                           icon="play")
         self.act_stop = A("Stop", self.stop, QKeySequence(QKeyCombination(Qt.Key.Key_MediaStop)), icon="stop")
         self.act_prev = A("Previous file", self.prev_file, ["PgUp", QKeySequence(QKeyCombination(Qt.Key.Key_MediaPrevious))], icon="prev")
@@ -668,13 +666,30 @@ class MainWindow(QMainWindow):
             print("PLAYBACK ERROR:", msg)
 
     # ================================================================ player events
+    def _poll(self) -> None:
+        """5 times a second: position, buffered amount and frame counter."""
+        p = self.player
+        if p is None or self.current_entry is None or self._idle:
+            return
+        pos = _num_or_none(p.get("time-pos"))
+        if pos is not None:
+            self._pos = pos
+            if not self.controls.seekbar.is_dragging():
+                self.controls.set_time(pos)
+            self._check_intro()
+        self.controls.seekbar.set_buffered(_num_or_none(p.get("demuxer-cache-time")) or 0.0)
+        if self.cfg.get("show_frame_counter"):
+            self.controls.set_frame_text(self._frame_text())
+
+    def _frame_text(self) -> str:
+        n = self.player.get("estimated-frame-number") if self.player else None
+        fps = _num_or_none(self.player.get("container-fps")) if self.player else None
+        if not isinstance(n, (int, float)):
+            return "Frame –"
+        return f"Frame {int(n)}" + (f" · {fps:.3f} fps" if fps else "")
+
     def _on_prop(self, name: str, value) -> None:  # noqa: C901 - simple dispatch
-        if name == "time-pos":
-            self._pos = _num_or_none(value)
-            if self._pos is not None:
-                self.controls.set_time(self._pos)
-                self._check_intro()
-        elif name == "duration":
+        if name == "duration":
             self._duration = _num_or_none(value)
             self.controls.set_time(None, self._duration or 0.0)
         elif name == "pause":
@@ -707,8 +722,6 @@ class MainWindow(QMainWindow):
                 if not self._loading and self.current_entry is None:
                     self.video.set_placeholder(True, "Drop a video here",
                                                "Ctrl+O to open a file  ·  Ctrl+U to open a link")
-        elif name == "demuxer-cache-time":
-            self.controls.seekbar.set_buffered(_num_or_none(value) or 0.0)
         elif name == "paused-for-cache":
             if value:
                 self.osd("Buffering…", 60000)
@@ -739,17 +752,6 @@ class MainWindow(QMainWindow):
                 b = _num_or_none(value)
             self._ab = (a, b)
             self.controls.set_ab(a, b)
-        elif name == "estimated-frame-number":
-            if self.cfg.get("show_frame_counter") or self._frame_osd:
-                fps = _num_or_none(self.player.get("container-fps"))
-                n = int(value) if isinstance(value, (int, float)) else None
-                if n is not None:
-                    text = f"Frame {n}" + (f" · {fps:.3f} fps" if fps else "")
-                    if self.cfg.get("show_frame_counter"):
-                        self.controls.set_frame_text(text)
-                    if self._frame_osd:
-                        self._frame_osd = False
-                        self.osd(f"Frame {n}  ·  {fmt_time(self._pos)}")
 
     def _on_file_loaded(self) -> None:
         entry = self.current_entry
@@ -842,12 +844,11 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, lambda: self._switch_backend("native"))
 
     def _render_error(self, msg: str) -> None:
-        if self.backend == "opengl" and self.video is not None and self.video.frames == 0 and self._has_video:
-            self._gl_failed(msg)
+        LOG.write(f"video output error: {msg}")
 
     def _check_gl_frames(self) -> None:
         if (self.backend == "opengl" and self._has_video and self.video is not None and self.video.frames == 0
-                and self.isVisible() and not self.isMinimized() and self.video.isVisible()):
+                and not self._paused and self.isVisible() and not self.isMinimized() and self.video.isVisible()):
             self._gl_failed("no frames were drawn")
 
     def _switch_backend(self, backend: str) -> None:
@@ -855,8 +856,7 @@ class MainWindow(QMainWindow):
             return
         self._last_backend_switch = time.monotonic()
         entry, pos = self.current_entry, self._pos
-        self.cfg.set("video_backend", backend)
-        self._build_video(backend)
+        self._build_video(backend)  # for this session only; next start tries the standard mode again
         if entry:
             if pos and not is_url(entry):
                 self.cfg.set_position(entry, pos)
@@ -930,8 +930,13 @@ class MainWindow(QMainWindow):
     def frame_step(self, back: bool) -> None:
         if self._idle:
             return
-        self._frame_osd = True
         self.player.frame_step(back)
+
+        def show() -> None:
+            self._poll()
+            self.osd(f"{self._frame_text()}  ·  {fmt_time(self._pos)}")
+
+        QTimer.singleShot(150, show)
 
     def set_speed(self, speed: float, osd: bool = True) -> None:
         s = self.player.set_speed(speed)
@@ -945,7 +950,7 @@ class MainWindow(QMainWindow):
     def _set_pitch(self, on: bool) -> None:
         self.cfg.set("pitch_correction", bool(on))
         self.player.set("audio-pitch-correction", bool(on))
-        self.osd("Pitch correction " + ("on" if on else "off"))
+        self.osd("Pitch correction " + ("on" if on else "off") + " — takes effect after restarting Strimo", 2500)
 
     def set_volume(self, vol: int, osd: bool = True) -> None:
         v = self.player.set_volume(vol)
@@ -1355,8 +1360,7 @@ class MainWindow(QMainWindow):
         if not on:
             self.controls.set_frame_text(None)
         else:
-            n = self.player.get("estimated-frame-number") if self.player else None
-            self.controls.set_frame_text(f"Frame {n}" if n is not None else "Frame –")
+            self.controls.set_frame_text(self._frame_text())
 
     # ================================================================ window modes
     def _apply_window_flags(self) -> None:
@@ -1564,24 +1568,33 @@ class MainWindow(QMainWindow):
             return True
         return isinstance(fw, QComboBox) and fw.isEditable()
 
+    _KEY_PRESS = QEvent.Type.KeyPress
+    _KEY_RELEASE = QEvent.Type.KeyRelease
+
     def eventFilter(self, obj, ev):
+        # this sees every event in the app, so leave quickly for anything that isn't a key
         t = ev.type()
-        if t in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
-            if (isinstance(obj, QWidget) and obj.window() is self and QApplication.activePopupWidget() is None
-                    and QApplication.activeModalWidget() is None and not self._focus_is_text()):
-                key = ev.key()
-                mods = ev.modifiers() & ~Qt.KeyboardModifier.KeypadModifier
-                if key in (Qt.Key.Key_Left, Qt.Key.Key_Right, Qt.Key.Key_Up, Qt.Key.Key_Down) and mods in (
-                        Qt.KeyboardModifier.NoModifier, Qt.KeyboardModifier.ShiftModifier):
-                    shift = mods == Qt.KeyboardModifier.ShiftModifier
-                    if t == QEvent.Type.KeyPress:
-                        self._arrow_press(key, shift, ev.isAutoRepeat())
-                    else:
-                        self._arrow_release(key, shift, ev.isAutoRepeat())
-                    return True
+        if t != self._KEY_PRESS and t != self._KEY_RELEASE:
+            return False
+        if (isinstance(obj, QWidget) and obj.window() is self and QApplication.activePopupWidget() is None
+                and QApplication.activeModalWidget() is None and not self._focus_is_text()):
+            key = ev.key()
+            mods = ev.modifiers() & ~Qt.KeyboardModifier.KeypadModifier
+            if key == Qt.Key.Key_Space and mods == Qt.KeyboardModifier.NoModifier:
+                if t == QEvent.Type.KeyPress and not ev.isAutoRepeat():
+                    self.toggle_pause()
+                return True
+            if key in (Qt.Key.Key_Left, Qt.Key.Key_Right, Qt.Key.Key_Up, Qt.Key.Key_Down) and mods in (
+                    Qt.KeyboardModifier.NoModifier, Qt.KeyboardModifier.ShiftModifier):
+                shift = mods == Qt.KeyboardModifier.ShiftModifier
                 if t == QEvent.Type.KeyPress:
-                    self._show_controls()
-        return super().eventFilter(obj, ev)
+                    self._arrow_press(key, shift, ev.isAutoRepeat())
+                else:
+                    self._arrow_release(key, shift, ev.isAutoRepeat())
+                return True
+            if t == QEvent.Type.KeyPress:
+                self._show_controls()
+        return False
 
     def _arrow_press(self, key, shift: bool, repeat: bool) -> None:
         skip = float(self.cfg.get("skip_seconds"))

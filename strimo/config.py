@@ -23,7 +23,7 @@ DEFAULTS: dict = {
     "boost_speed": 2.0,
     "loop_mode": "none",          # none | one | all
     "hwdec": True,
-    "video_backend": "opengl",    # opengl | native
+    "network_cache_s": 2,         # seconds VLC buffers before playing a link
     # streaming / downloads
     "cache_mb": 150,
     "readahead_secs": 60,

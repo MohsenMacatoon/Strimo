@@ -160,6 +160,53 @@ class SelfTest(QObject):
             self.check("pause works", w.player.get("pause") is True)
             w.toggle_pause()
 
+        @step("Space key pauses", 300)
+        def _():
+            from PySide6.QtCore import QEvent, Qt
+            from PySide6.QtGui import QKeyEvent
+
+            self._p_before = w.player.get("pause")
+            for t in (QEvent.Type.KeyPress, QEvent.Type.KeyRelease):
+                QApplication.sendEvent(w.controls, QKeyEvent(t, Qt.Key.Key_Space, Qt.KeyboardModifier.NoModifier))
+
+        @step("Space key result", 100)
+        def _():
+            self.check("Space key toggles pause", w.player.get("pause") != self._p_before,
+                       f"before={self._p_before} after={w.player.get('pause')}")
+            if w.player.get("pause"):
+                w.toggle_pause()
+
+        @step("click on video pauses", 700)
+        def _():
+            from PySide6.QtCore import QEvent, QPointF, Qt
+            from PySide6.QtGui import QMouseEvent
+
+            self._p_before = w.player.get("pause")
+            pt = QPointF(20, 20)
+            for t in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease):
+                ev = QMouseEvent(t, pt, w.video.mapToGlobal(pt), Qt.MouseButton.LeftButton,
+                                 Qt.MouseButton.LeftButton if t == QEvent.Type.MouseButtonPress else Qt.MouseButton.NoButton,
+                                 Qt.KeyboardModifier.NoModifier)
+                QApplication.sendEvent(w.video, ev)
+
+        @step("click result", 100)
+        def _():
+            self.check("single click on video toggles pause", w.player.get("pause") != self._p_before,
+                       f"before={self._p_before} after={w.player.get('pause')}")
+            if w.player.get("pause"):
+                w.toggle_pause()
+
+        @step("play button pauses", 300)
+        def _():
+            self._p_before = w.player.get("pause")
+            w.controls.play_btn.click()
+
+        @step("play button result", 100)
+        def _():
+            self.check("play/pause button toggles pause", w.player.get("pause") != self._p_before)
+            if w.player.get("pause"):
+                w.toggle_pause()
+
         @step("seek forward/back", 600)
         def _():
             w.seek_relative(3)
@@ -217,13 +264,28 @@ class SelfTest(QObject):
             assert int(w.player.get("video-rotate")) == 180
             w.act_flip_h.setChecked(True)
             w.act_flip_v.setChecked(True)
-            vf = str(w.player.get("vf"))
-            assert "hflip" in vf and "vflip" in vf, vf
+            assert w.player.flip_h and w.player.flip_v
+            from .player import transform_type
+            assert transform_type(0, False, False) == ""
+            assert transform_type(90, False, False) == "90"
+            assert transform_type(0, True, False) == "hflip"
+            assert transform_type(0, True, True) == "180"
+            assert transform_type(90, True, False) in ("transpose", "antitranspose")
+            assert transform_type(270, False, True) in ("transpose", "antitranspose")
             w.toggle_portrait()
             w.reset_orientation()
             assert int(w.player.get("video-rotate")) == 0
-            assert "flip" not in str(w.player.get("vf") or "")
+            assert not w.player.flip_h and not w.player.flip_v
             self.ok("rotate 90/180/270, mirror, flip, portrait, reset")
+
+        @step("video re-opens after rotation", 1500)
+        def _():
+            w.rotate(90)
+
+        @step("rotation keeps playing", 200)
+        def _():
+            self.check("still playing after rotation", not w._idle and (w._pos or 0) > 0.5, f"pos={w._pos}")
+            w.reset_orientation()
 
         @step("aspect, zoom, picture", 300)
         def _():
@@ -242,7 +304,7 @@ class SelfTest(QObject):
         @step("audio filters", 300)
         def _():
             w.act_night.setChecked(True)
-            assert "dynaudnorm" in str(w.player.get("af")), w.player.get("af")
+            assert w.player.night_mode, "night mode flag"
             w.act_night.setChecked(False)
             self.ok("night mode")
 

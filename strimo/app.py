@@ -86,12 +86,15 @@ def main(argv=None) -> int:
         app.setWindowIcon(QIcon(icon_path))
 
     try:
-        import mpv  # noqa: F401  (loads libmpv-2.dll)
-    except (OSError, ImportError) as exc:
+        import vlc  # noqa: F401  (loads libvlc.dll)
+
+        if not hasattr(vlc, "Instance") or vlc.dll is None:
+            raise OSError("libvlc.dll was not found")
+    except (Exception, SystemExit) as exc:  # python-vlc may call sys.exit if the dll fails
         _log_exception(type(exc), exc, exc.__traceback__)
         QMessageBox.critical(
             None, APP_NAME,
-            "Strimo's playback engine (libmpv-2.dll) could not be loaded.\n\n"
+            "Strimo's playback engine (VLC / libvlc.dll) could not be loaded.\n\n"
             "Please reinstall Strimo.\n\nDetails: " + str(exc))
         return 1
 

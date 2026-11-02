@@ -1,23 +1,16 @@
 """Video surfaces.
 
-GLVideoWidget  - default. mpv draws into a Qt OpenGL widget (libmpv render API),
-                 so mouse, keyboard and overlays all behave like normal Qt widgets.
-NativeVideoWidget - compatibility mode. mpv gets its own native child window (wid).
-NullVideoWidget  - used by the automated self-test (no video output).
+NativeVideoWidget - libVLC draws the video straight into this native window (like the VLC app).
+NullVideoWidget   - used by the automated self-test (no video output).
 """
 
 from __future__ import annotations
 
-import ctypes
-import os
-
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QColor, QFont, QLinearGradient, QOpenGLContext, QPainter, QPainterPath
-from PySide6.QtOpenGLWidgets import QOpenGLWidget
+from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath
 from PySide6.QtWidgets import QWidget
 
 from . import theme
-from .player import LOG
 
 
 def paint_placeholder(widget: QWidget, painter: QPainter, message: str, sub: str) -> None:
@@ -111,137 +104,6 @@ class _PlaceholderState:
             self.update()
 
 
-# ---------------------------------------------------------------------------
-def _make_proc_address_getter():
-    """Return fn(name: bytes) -> int address of an OpenGL function."""
-    if os.name == "nt":
-        opengl32 = ctypes.WinDLL("opengl32")
-        kernel32 = ctypes.WinDLL("kernel32")
-        wgl = opengl32.wglGetProcAddress
-        wgl.restype = ctypes.c_void_p
-        wgl.argtypes = [ctypes.c_char_p]
-        gpa = kernel32.GetProcAddress
-        gpa.restype = ctypes.c_void_p
-        gpa.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
-        handle = ctypes.c_void_p(opengl32._handle)
-
-        def get(name: bytes) -> int:
-            addr = wgl(name)
-            if addr in (None, 0, 1, 2, 3, -1, 0xFFFFFFFF, 0xFFFFFFFFFFFFFFFF):
-                addr = gpa(handle, name)
-            return int(addr or 0)
-
-        return get
-
-    def get_qt(name: bytes) -> int:
-        ctx = QOpenGLContext.currentContext()
-        if ctx is None:
-            return 0
-        try:
-            addr = ctx.getProcAddress(name)
-        except TypeError:
-            addr = ctx.getProcAddress(name.decode())
-        try:
-            return int(addr or 0)
-        except TypeError:
-            return 0
-
-    return get_qt
-
-
-class GLVideoWidget(_MouseForwarder, _PlaceholderState, QOpenGLWidget):
-    frame_ready = Signal()
-    gl_failed = Signal(str)
-
-    def __init__(self, host, parent=None):
-        QOpenGLWidget.__init__(self, parent)
-        self._setup_mouse(host)
-        self.player = None
-        self.ctx = None
-        self.has_video = False
-        self.frames = 0
-        self._get_proc = None
-        self._proc_cb = None
-        self.frame_ready.connect(self._repaint, Qt.ConnectionType.QueuedConnection)
-        self._watched_context = None
-
-    def attach(self, player) -> None:
-        self.player = player
-
-    def _repaint(self):
-        self.update()
-
-    def _proc_address(self, _ctx, name):
-        try:
-            return self._get_proc(name)
-        except Exception:
-            return 0
-
-    def initializeGL(self):
-        if self.player is None:
-            return
-        # free mpv's renderer before Qt destroys this GL context (e.g. window re-created)
-        try:
-            glctx = self.context()
-            if glctx is not None and glctx is not self._watched_context:
-                glctx.aboutToBeDestroyed.connect(self.free_context)
-                self._watched_context = glctx
-        except Exception as exc:  # noqa: BLE001
-            LOG.write(f"could not watch GL context: {exc}")
-        try:
-            import mpv
-
-            self._get_proc = _make_proc_address_getter()
-            self._proc_cb = mpv.MpvGlGetProcAddressFn(self._proc_address)
-            self.ctx = mpv.MpvRenderContext(
-                self.player.m, "opengl", opengl_init_params={"get_proc_address": self._proc_cb}
-            )
-            self.ctx.update_cb = self._on_mpv_update
-            LOG.write("OpenGL render context created")
-            if self.has_video:
-                # context was re-created while a file was open: wake the video track up again
-                vid = self.player.get("vid")
-                self.player.set("vid", "no")
-                self.player.set("vid", vid if vid not in (None, False, "no") else "auto")
-        except Exception as exc:  # noqa: BLE001
-            self.ctx = None
-            LOG.write(f"OpenGL render context failed: {exc}")
-            self.gl_failed.emit(str(exc))
-
-    def _on_mpv_update(self):
-        # called from an mpv thread
-        self.frame_ready.emit()
-
-    def paintGL(self):
-        if self.ctx is not None and self.has_video and not self.show_placeholder:
-            ratio = self.devicePixelRatioF()
-            w = max(1, int(self.width() * ratio))
-            h = max(1, int(self.height() * ratio))
-            try:
-                self.ctx.render(flip_y=True, opengl_fbo={"w": w, "h": h, "fbo": self.defaultFramebufferObject()})
-                self.frames += 1
-            except Exception as exc:  # noqa: BLE001
-                LOG.write(f"render failed: {exc}")
-            return
-        p = QPainter(self)
-        paint_placeholder(self, p, self.message, self.sub)
-        p.end()
-
-    def free_context(self):
-        if self.ctx is not None:
-            try:
-                self.makeCurrent()
-                self.ctx.free()
-            except Exception as exc:  # noqa: BLE001
-                LOG.write(f"free render context: {exc}")
-            finally:
-                self.ctx = None
-                try:
-                    self.doneCurrent()
-                except Exception:  # noqa: BLE001
-                    pass
-
-
 class NativeVideoWidget(_MouseForwarder, _PlaceholderState, QWidget):
     gl_failed = Signal(str)  # unused, keeps the interface identical
 
@@ -250,6 +112,7 @@ class NativeVideoWidget(_MouseForwarder, _PlaceholderState, QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_NativeWindow, True)
         self.setAttribute(Qt.WidgetAttribute.WA_DontCreateNativeAncestors, True)
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         self._setup_mouse(host)
         self.player = None
         self.has_video = False
@@ -261,12 +124,18 @@ class NativeVideoWidget(_MouseForwarder, _PlaceholderState, QWidget):
     def attach(self, player) -> None:
         self.player = player
 
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        if self.player is not None and hasattr(self.player, "window_resized"):
+            self.player.window_resized(self.width(), self.height())
+
     def paintEvent(self, _e):
+        # while a video plays, VLC draws into its own child window here; painting
+        # over it would cause flicker, so Qt only draws the start/placeholder screen
+        if self.has_video and not self.show_placeholder:
+            return
         p = QPainter(self)
-        if self.show_placeholder or not self.has_video:
-            paint_placeholder(self, p, self.message, self.sub)
-        else:
-            p.fillRect(self.rect(), QColor("black"))
+        paint_placeholder(self, p, self.message, self.sub)
         p.end()
 
     def free_context(self):
