@@ -198,14 +198,104 @@ class SelfTest(QObject):
 
         @step("play button pauses", 300)
         def _():
+            from PySide6.QtCore import QEvent, QPointF, Qt
+            from PySide6.QtGui import QMouseEvent
+
+            # a real mouse press + release on the button, like a user's click
             self._p_before = w.player.get("pause")
-            w.controls.play_btn.click()
+            btn = w.controls.play_btn
+            pt = QPointF(btn.width() / 2, btn.height() / 2)
+            for t in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease):
+                ev = QMouseEvent(t, pt, btn.mapToGlobal(pt), Qt.MouseButton.LeftButton,
+                                 Qt.MouseButton.LeftButton if t == QEvent.Type.MouseButtonPress else Qt.MouseButton.NoButton,
+                                 Qt.KeyboardModifier.NoModifier)
+                QApplication.sendEvent(btn, ev)
+            if w.player.get("pause") == self._p_before:
+                btn.click()  # fall back, so the next steps still run; the check below reports it
+                self._button_needed_fallback = True
 
         @step("play button result", 100)
         def _():
-            self.check("play/pause button toggles pause", w.player.get("pause") != self._p_before)
+            self.check("play/pause button toggles pause (real mouse click)",
+                       w.player.get("pause") != self._p_before and not getattr(self, "_button_needed_fallback", False))
             if w.player.get("pause"):
                 w.toggle_pause()
+
+        @step("seek bar click", 1200)
+        def _():
+            from PySide6.QtCore import QEvent, QPointF, Qt
+            from PySide6.QtGui import QMouseEvent
+
+            bar = w.controls.seekbar
+            self._bar_target = bar.duration * 0.25
+            x = bar._x_for(self._bar_target)
+            pt = QPointF(x, bar.height() / 2)
+            press = QMouseEvent(QEvent.Type.MouseButtonPress, pt, bar.mapToGlobal(pt), Qt.MouseButton.LeftButton,
+                                Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+            QApplication.sendEvent(bar, press)
+            self._bar_dragging = bar.is_dragging()
+            release = QMouseEvent(QEvent.Type.MouseButtonRelease, pt, bar.mapToGlobal(pt), Qt.MouseButton.LeftButton,
+                                  Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier)
+            QApplication.sendEvent(bar, release)
+            # right after the click the bar must already show the new spot (no snapping back)
+            self._bar_shown_now = bar.position
+
+        @step("seek bar click result", 50)
+        def _():
+            ok_now = abs(self._bar_shown_now - self._bar_target) < 1.0
+            self.check("seek bar responds on the first click", self._bar_dragging and ok_now,
+                       f"target={self._bar_target:.1f} shown={self._bar_shown_now:.1f}")
+            pos = w.player._engine_time() or 0.0
+            self.check("video is at the clicked spot", abs(pos - self._bar_target) < 2.5,
+                       f"target={self._bar_target:.1f} pos={pos:.1f}")
+
+        @step("seek bar drag", 1200)
+        def _():
+            from PySide6.QtCore import QEvent, QPointF, Qt
+            from PySide6.QtGui import QMouseEvent
+
+            bar = w.controls.seekbar
+            self._seeks = []
+            bar.seek_requested.connect(lambda t, final: self._seeks.append((t, final)))
+            y = bar.height() / 2
+
+            def ev(t, x, buttons):
+                pt = QPointF(x, y)
+                return QMouseEvent(t, pt, bar.mapToGlobal(pt), Qt.MouseButton.LeftButton if t != QEvent.Type.MouseMove
+                                   else Qt.MouseButton.NoButton, buttons, Qt.KeyboardModifier.NoModifier)
+
+            QApplication.sendEvent(bar, ev(QEvent.Type.MouseButtonPress, bar._x_for(bar.duration * 0.1),
+                                           Qt.MouseButton.LeftButton))
+            for i in range(30):  # a fast drag: 30 moves in a row
+                QApplication.sendEvent(bar, ev(QEvent.Type.MouseMove, bar._x_for(bar.duration * (0.1 + i * 0.02)),
+                                               Qt.MouseButton.LeftButton))
+            self._drag_end = bar.duration * 0.68
+            QApplication.sendEvent(bar, ev(QEvent.Type.MouseButtonRelease, bar._x_for(self._drag_end),
+                                           Qt.MouseButton.NoButton))
+
+        @step("seek bar drag result", 50)
+        def _():
+            finals = [t for t, final in self._seeks if final]
+            drags = [t for t, final in self._seeks if not final]
+            self.check("drag sends few seeks and one exact seek at the end",
+                       len(drags) <= 3 and len(finals) == 1 and abs(finals[0] - self._drag_end) < 1.0,
+                       f"drag seeks={len(drags)} final={finals}")
+            pos = w.player._engine_time() or 0.0
+            self.check("video follows the drag", abs(pos - self._drag_end) < 2.5, f"end={self._drag_end:.1f} pos={pos:.1f}")
+
+        @step("quick skips add up", 1000)
+        def _():
+            w.seek_to(10.0)
+            self._skip_from = 10.0
+            for _i in range(3):
+                w.seek_relative(5)
+            self._skip_shown = w._pos or 0.0
+
+        @step("quick skips result", 50)
+        def _():
+            pos = w.player._engine_time() or 0.0
+            self.check("3 quick → presses skip 15 s", abs(self._skip_shown - 25.0) < 1.0 and abs(pos - 25.0) < 2.0,
+                       f"shown right away={self._skip_shown:.1f} later={pos:.1f}")
 
         @step("seek forward/back", 600)
         def _():

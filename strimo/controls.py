@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtGui import QFont, QFontMetrics
 from PySide6.QtWidgets import (
     QCheckBox, QDoubleSpinBox, QGridLayout, QHBoxLayout, QLabel, QMenu, QPushButton,
-    QSizePolicy, QSlider, QToolButton, QVBoxLayout, QWidget, QWidgetAction,
+    QSizePolicy, QSlider, QStyle, QStyleOptionSlider, QToolButton, QVBoxLayout, QWidget, QWidgetAction,
 )
 
 from . import icons
@@ -13,6 +14,48 @@ from .seekbar import SeekBar
 from .util import fmt_speed, fmt_time, round_speed
 
 SPEED_PRESETS = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 3.0]
+
+
+class JumpSlider(QSlider):
+    """A slider that jumps straight to where you click (like VLC's), then drags from there."""
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.MouseButton.LeftButton and self.maximum() > self.minimum():
+            opt = QStyleOptionSlider()
+            self.initStyleOption(opt)
+            style = self.style()
+            handle = style.subControlRect(QStyle.ComplexControl.CC_Slider, opt,
+                                          QStyle.SubControl.SC_SliderHandle, self)
+            pos = e.position().toPoint()
+            if not handle.contains(pos):
+                groove = style.subControlRect(QStyle.ComplexControl.CC_Slider, opt,
+                                              QStyle.SubControl.SC_SliderGroove, self)
+                if self.orientation() == Qt.Orientation.Horizontal:
+                    span = max(1, groove.width() - handle.width())
+                    offset = pos.x() - groove.x() - handle.width() // 2
+                else:
+                    span = max(1, groove.height() - handle.height())
+                    offset = pos.y() - groove.y() - handle.height() // 2
+                value = QStyle.sliderValueFromPosition(self.minimum(), self.maximum(),
+                                                       max(0, min(span, offset)), span, opt.upsideDown)
+                self.setValue(value)
+        super().mousePressEvent(e)
+
+
+def _theme_font() -> QFont:
+    """The font the theme's stylesheet gives the labels (measured before it is applied)."""
+    f = QFont("Segoe UI")
+    f.setPointSizeF(10)
+    return f
+
+
+def connect_click(button, signal) -> None:
+    """button.clicked -> signal() without passing Qt's 'checked' argument along.
+
+    (Connecting clicked straight to signal.emit can hand the extra argument to a
+    signal that takes none; the click then silently does nothing.)
+    """
+    button.clicked.connect(lambda *_args: signal.emit())
 
 
 def tool_button(icon_name: str, tip: str, size: int = 34, icon_px: int = 20) -> QToolButton:
@@ -47,7 +90,7 @@ class SpeedPopup(QWidget):
         head.addWidget(self.value)
         lay.addLayout(head)
 
-        self.slider = QSlider(Qt.Orientation.Horizontal)
+        self.slider = JumpSlider(Qt.Orientation.Horizontal)
         self.slider.setRange(5, 800)  # hundredths
         self.slider.setSingleStep(1)
         self.slider.setPageStep(10)
@@ -93,7 +136,7 @@ class SpeedPopup(QWidget):
 
         self.pitch = QCheckBox("Keep voice pitch natural (pitch correction)")
         self.pitch.setChecked(True)
-        self.pitch.toggled.connect(self.pitch_toggled.emit)
+        self.pitch.toggled.connect(lambda on: self.pitch_toggled.emit(bool(on)))
         lay.addWidget(self.pitch)
 
         hint = QLabel("Keys: [ ] ±0.1   { } ±0.01   Backspace = 1×")
@@ -158,12 +201,14 @@ class ControlBar(QWidget):
         seek_row.setSpacing(8)
         self.pos_label = QLabel("0:00")
         self.pos_label.setObjectName("timeLabel")
-        self.pos_label.setMinimumWidth(52)
         self.pos_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.seekbar = SeekBar()
         self.dur_label = ClickLabel("0:00")
         self.dur_label.setObjectName("timeLabel")
-        self.dur_label.setMinimumWidth(56)
+        # fixed widths: changing digits never re-lays-out the window (VLC does the same)
+        fm = QFontMetrics(_theme_font())
+        self.pos_label.setFixedWidth(fm.horizontalAdvance("00:00:00") + 14)
+        self.dur_label.setFixedWidth(fm.horizontalAdvance("-00:00:00") + 14)
         self.dur_label.setToolTip("Click to switch between total and remaining time")
         self.dur_label.setCursor(Qt.CursorShape.PointingHandCursor)
         self.dur_label.clicked.connect(self._toggle_remaining)
@@ -180,26 +225,27 @@ class ControlBar(QWidget):
         self.play_btn.setObjectName("playButton")
         self.next_btn = tool_button("next", "Next file (Page Down)")
         self.stop_btn = tool_button("stop", "Stop")
-        self.prev_btn.clicked.connect(self.prev_clicked.emit)
-        self.play_btn.clicked.connect(self.play_clicked.emit)
-        self.next_btn.clicked.connect(self.next_clicked.emit)
-        self.stop_btn.clicked.connect(self.stop_clicked.emit)
+        connect_click(self.prev_btn, self.prev_clicked)
+        connect_click(self.play_btn, self.play_clicked)
+        connect_click(self.next_btn, self.next_clicked)
+        connect_click(self.stop_btn, self.stop_clicked)
         for b in (self.prev_btn, self.play_btn, self.next_btn, self.stop_btn):
             row.addWidget(b)
         row.addSpacing(10)
 
         self.mute_btn = tool_button("volume", "Mute (M)")
-        self.mute_btn.clicked.connect(self.mute_clicked.emit)
-        self.volume = QSlider(Qt.Orientation.Horizontal)
+        connect_click(self.mute_btn, self.mute_clicked)
+        self.volume = JumpSlider(Qt.Orientation.Horizontal)
         self.volume.setRange(0, 200)
         self.volume.setValue(100)
         self.volume.setFixedWidth(110)
         self.volume.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.volume.setToolTip("Volume (↑ / ↓, mouse wheel). Goes up to 200%")
-        self.volume.valueChanged.connect(self.volume_changed.emit)
+        self.volume.valueChanged.connect(lambda v: self.volume_changed.emit(int(v)))
         self.vol_label = QLabel("100%")
         self.vol_label.setObjectName("timeLabel")
-        self.vol_label.setMinimumWidth(40)
+        vfm = QFontMetrics(_theme_font())
+        self.vol_label.setFixedWidth(max(vfm.horizontalAdvance("Muted"), vfm.horizontalAdvance("200%")) + 14)
         row.addWidget(self.mute_btn)
         row.addWidget(self.volume)
         row.addWidget(self.vol_label)
@@ -216,7 +262,7 @@ class ControlBar(QWidget):
         self.sleep_label.setObjectName("badge")
         self.sleep_label.setToolTip("Sleep timer is on — click to change or cancel")
         self.sleep_label.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.sleep_label.clicked.connect(self.sleep_clicked.emit)
+        self.sleep_label.clicked.connect(lambda *_a: self.sleep_clicked.emit())
         self.sleep_label.hide()
         row.addWidget(self.sleep_label)
         row.addSpacing(6)
@@ -240,16 +286,16 @@ class ControlBar(QWidget):
         self.rotate_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.ab_btn = tool_button("loop", "A-B repeat (L)")
         self.ab_btn.setCheckable(True)
-        self.ab_btn.clicked.connect(lambda _=False: self.ab_clicked.emit())
+        connect_click(self.ab_btn, self.ab_clicked)
         self.shot_btn = tool_button("camera", "Screenshot (S)")
-        self.shot_btn.clicked.connect(self.screenshot_clicked.emit)
+        connect_click(self.shot_btn, self.screenshot_clicked)
         self.mini_btn = tool_button("mini", "Mini player (Ctrl+M)")
-        self.mini_btn.clicked.connect(self.mini_clicked.emit)
+        connect_click(self.mini_btn, self.mini_clicked)
         self.panel_btn = tool_button("panel", "Side panel: playlist, bookmarks, notes, downloads (Ctrl+P)")
         self.panel_btn.setCheckable(True)
-        self.panel_btn.clicked.connect(lambda _=False: self.panel_clicked.emit())
+        connect_click(self.panel_btn, self.panel_clicked)
         self.fs_btn = tool_button("fullscreen", "Fullscreen (F / double-click)")
-        self.fs_btn.clicked.connect(self.fullscreen_clicked.emit)
+        connect_click(self.fs_btn, self.fullscreen_clicked)
         for b in (self.rotate_btn, self.ab_btn, self.shot_btn, self.mini_btn, self.panel_btn, self.fs_btn):
             row.addWidget(b)
         root.addLayout(row)
@@ -269,12 +315,12 @@ class ControlBar(QWidget):
             self.dur_label.setText(fmt_time(self._dur, hours) if self._dur else "0:00")
 
     def set_time(self, pos, dur=None) -> None:
-        if pos is not None:
-            self._pos = float(pos)
-            self.seekbar.set_position(pos)
         if dur is not None:
             self._dur = float(dur)
             self.seekbar.set_duration(dur)
+        if pos is not None:
+            # while dragging, the labels follow the handle instead of the engine
+            self._pos = float(self.seekbar.set_position(pos))
         self._refresh_time()
 
     def reset_time(self) -> None:

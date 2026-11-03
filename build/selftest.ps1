@@ -6,8 +6,8 @@ $work = Join-Path $PWD 'selftest'
 New-Item -ItemType Directory -Force $work | Out-Null
 $video = Join-Path $work 'test.mp4'
 & vendor\tools\ffmpeg.exe -hide_banner -loglevel error -y `
-    -f lavfi -i 'testsrc2=duration=12:size=640x360:rate=30' `
-    -f lavfi -i 'sine=frequency=440:duration=12' `
+    -f lavfi -i 'testsrc2=duration=60:size=640x360:rate=30' `
+    -f lavfi -i 'sine=frequency=440:duration=60' `
     -shortest -c:v libx264 -pix_fmt yuv420p -c:a aac $video
 if (-not (Test-Path $video)) { throw 'could not create the test video' }
 

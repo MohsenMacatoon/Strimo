@@ -82,6 +82,8 @@ class MainWindow(QMainWindow):
         self._ignore_release = False
         self._gl_check_timer = None
         self._runners = []
+        self._poll_ticks = 0
+        self._click_paused = None   # pause state before a single click (undone by a double-click)
 
         self.downloads = DownloadManager(cfg, self)
 
@@ -108,7 +110,7 @@ class MainWindow(QMainWindow):
         self.click_timer = QTimer(self)
         self.click_timer.setSingleShot(True)
         self.click_timer.setInterval(max(180, QApplication.styleHints().mouseDoubleClickInterval()))
-        self.click_timer.timeout.connect(self._single_click)
+        self.click_timer.timeout.connect(lambda: setattr(self, "_click_paused", None))
         self.save_timer = QTimer(self)
         self.save_timer.setInterval(10_000)
         self.save_timer.timeout.connect(self._periodic_save)
@@ -671,6 +673,14 @@ class MainWindow(QMainWindow):
         p = self.player
         if p is None or self.current_entry is None or self._idle:
             return
+        self._poll_ticks += 1
+        if self._poll_ticks % 5 == 0 and self.video is not None:
+            self.video.claim_input()          # VLC may have made a new video window
+        if not self._duration:
+            dur = _num_or_none(p.get("duration"))
+            if dur:
+                self._duration = dur
+                self.controls.set_time(None, dur)
         pos = _num_or_none(p.get("time-pos"))
         if pos is not None:
             self._pos = pos
@@ -736,6 +746,8 @@ class MainWindow(QMainWindow):
                 self._has_video = True
                 self.video.has_video = True
                 self.video.set_placeholder(False)
+                self.video.claim_input()
+                QTimer.singleShot(300, self.video.claim_input)
         elif name == "vid":
             if (value in (False, None, "no") and self.current_entry and not self._loading
                     and not self.player.get("idle-active", True)):
@@ -910,18 +922,26 @@ class MainWindow(QMainWindow):
         if self.current_entry is None or self._idle:
             return
         self.player.seek(seconds, "relative", exact=True)
-        target = (self._pos or 0) + seconds
-        if self._duration:
-            target = max(0.0, min(self._duration, target))
+        target = self._after_seek()
         sign = "+" if seconds > 0 else "−"
-        self.osd(f"{sign}{abs(seconds):g} s   {fmt_time(max(0.0, target))} / {fmt_time(self._duration)}")
+        self.osd(f"{sign}{abs(seconds):g} s   {fmt_time(max(0.0, target or 0.0))} / {fmt_time(self._duration)}")
 
     def seek_to(self, seconds: float, exact: bool = True, osd: bool = True) -> None:
         if self.current_entry is None or self._idle:
             return
         self.player.seek(max(0.0, float(seconds)), "absolute", exact=exact)
+        self._after_seek()
         if osd:
             self.osd(f"{fmt_time(seconds)} / {fmt_time(self._duration)}")
+
+    def _after_seek(self):
+        """Show the new spot right away instead of waiting for the next update."""
+        t = _num_or_none(self.player.get("time-pos"))
+        if t is not None:
+            self._pos = t
+            if not self.controls.seekbar.is_dragging():
+                self.controls.set_time(t)
+        return t
 
     def seek_percent(self, pct: float) -> None:
         if self._duration:
@@ -1515,19 +1535,27 @@ class MainWindow(QMainWindow):
             self._ignore_release = False
             return
         if not self._dragged:
-            self.click_timer.start()
+            self._single_click()
         self._dragged = False
 
     def video_double_click(self, _e) -> None:
+        # the first click of the double-click already toggled pause: undo that, then go fullscreen
+        if self._click_paused is not None and self.click_timer.isActive():
+            if bool(self.player.get("pause", False)) != self._click_paused:
+                self.toggle_pause()
+        self._click_paused = None
         self.click_timer.stop()
         self._ignore_release = True
         self.toggle_fullscreen()
 
     def _single_click(self) -> None:
+        """Click on the video = play/pause immediately (no waiting to see if a double-click follows)."""
         if self.current_entry is None:
             self.open_file_dialog()
-        else:
-            self.toggle_pause()
+            return
+        self._click_paused = bool(self.player.get("pause", False))
+        self.toggle_pause()
+        self.click_timer.start()  # window in which a double-click undoes this toggle
 
     def video_wheel(self, e, width: int) -> None:
         steps = e.angleDelta().y() / 120.0

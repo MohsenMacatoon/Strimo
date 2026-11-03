@@ -6,11 +6,54 @@ NullVideoWidget   - used by the automated self-test (no video output).
 
 from __future__ import annotations
 
+import os
+
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath
 from PySide6.QtWidgets import QWidget
 
 from . import theme
+
+# --- Windows: keep VLC's video window from swallowing clicks and keys -------------
+# libVLC draws into its own child window inside ours. On Windows that window eats
+# every click (turning off VLC's mouse handling does not pass them on). A *disabled*
+# child window is skipped when Windows decides who gets the mouse, so the click lands
+# on our widget instead - and a disabled window can never take keyboard focus.
+_user32 = None
+if os.name == "nt":
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        _user32 = ctypes.WinDLL("user32")
+        _WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        _user32.EnumChildWindows.argtypes = [wintypes.HWND, _WNDENUMPROC, wintypes.LPARAM]
+        _user32.EnumChildWindows.restype = wintypes.BOOL
+        _user32.IsWindowEnabled.argtypes = [wintypes.HWND]
+        _user32.IsWindowEnabled.restype = wintypes.BOOL
+        _user32.EnableWindow.argtypes = [wintypes.HWND, wintypes.BOOL]
+        _user32.EnableWindow.restype = wintypes.BOOL
+    except Exception:  # noqa: BLE001
+        _user32 = None
+
+
+def disable_child_windows(hwnd: int) -> int:
+    """Disable every (VLC-created) window inside hwnd. Returns how many were changed."""
+    if _user32 is None or not hwnd:
+        return 0
+    found = []
+
+    def collect(h, _lparam):
+        found.append(h)
+        return True
+
+    _user32.EnumChildWindows(hwnd, _WNDENUMPROC(collect), 0)
+    changed = 0
+    for h in found:
+        if h and _user32.IsWindowEnabled(h):
+            _user32.EnableWindow(h, False)
+            changed += 1
+    return changed
 
 
 def paint_placeholder(widget: QWidget, painter: QPainter, message: str, sub: str) -> None:
@@ -121,6 +164,13 @@ class NativeVideoWidget(_MouseForwarder, _PlaceholderState, QWidget):
     def wid(self) -> int:
         return int(self.winId())
 
+    def claim_input(self) -> int:
+        """Make sure clicks/keys over the video reach Strimo, not VLC's own window."""
+        try:
+            return disable_child_windows(int(self.winId()))
+        except Exception:  # noqa: BLE001
+            return 0
+
     def attach(self, player) -> None:
         self.player = player
 
@@ -144,6 +194,9 @@ class NativeVideoWidget(_MouseForwarder, _PlaceholderState, QWidget):
 
 class NullVideoWidget(NativeVideoWidget):
     """For the self-test: behaves like the native widget without a real window handle."""
+
+    def claim_input(self) -> int:
+        return 0
 
     def __init__(self, host, parent=None):
         QWidget.__init__(self, parent)

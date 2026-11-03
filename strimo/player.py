@@ -19,7 +19,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 
 import vlc  # python-vlc; needs libvlc.dll + plugins (bundled in the "vlc" folder)
 
-from . import paths
+from . import __version__, paths
 from .util import is_url, round_speed
 
 OPT_TRUSTED = 0x2     # libvlc_media_option_trusted: allows filter / sout options per file
@@ -135,6 +135,8 @@ class Player(QObject):
         self._loaded = False        # file_loaded already sent for this file
         self._reloading = None      # dict while re-opening the same file (rotation, night mode)
         self._pending_seek = None   # seconds, applied once playback starts
+        self._seek_target = None    # newest requested seek, until VLC has caught up
+        self._seek_at = 0.0
         self._ab = [None, None]
         self._adjust = {"brightness": 0, "contrast": 0, "saturation": 0, "gamma": 0, "hue": 0}
         self._audio_delay = 0.0
@@ -198,7 +200,7 @@ class Player(QObject):
         self._reopen_timer.setSingleShot(True)
         self._reopen_timer.setInterval(220)
         self._reopen_timer.timeout.connect(self._reopen)
-        LOG.write(f"libVLC {self.version()} started")
+        LOG.write(f"Strimo {__version__} started with libVLC {self.version()}")
 
     # ================================================================ events
     def _make_cb(self, name):
@@ -274,6 +276,7 @@ class Player(QObject):
         elif name == "ended":
             if not self._state_is("Ended"):
                 return
+            self._seek_target = None
             if self._loop_file:
                 self._restart(0.0)
                 return
@@ -307,7 +310,7 @@ class Player(QObject):
             return None
         return ms / 1000.0 if ms and ms > 0 else None
 
-    def _time(self):
+    def _engine_time(self):
         if self._target is None or self._state_is("NothingSpecial", "Stopped", "Error", "Opening"):
             return None
         try:
@@ -317,6 +320,26 @@ class Player(QObject):
         if ms is None or ms < 0:
             return None
         return ms / 1000.0
+
+    def _time(self):
+        """Current time - or, right after a seek, the spot we're seeking to.
+
+        VLC seeks in the background, so for a moment it still reports the old
+        time. Reporting the target instead (like VLC's own interface does) stops
+        the seek bar from snapping back and makes quick repeated skips add up.
+        """
+        real = self._engine_time()
+        tgt = self._seek_target
+        if tgt is not None:
+            age = time.monotonic() - self._seek_at
+            ahead = (age + 0.3) * max(1.0, float(self._speed)) + 0.5
+            if real is not None and tgt - 0.4 <= real <= tgt + ahead:
+                self._seek_target = None          # VLC has arrived
+            elif age > 2.5 or self._state_is("Ended", "Stopped", "Error"):
+                self._seek_target = None          # give up waiting
+            else:
+                return tgt
+        return real
 
     def _fps(self):
         try:
@@ -457,6 +480,7 @@ class Player(QObject):
         self._loaded = False
         self._reloading = None
         self._pending_seek = None
+        self._seek_target = None
         self._buffering = False
         # per-file settings start fresh (like VLC/mpv)
         self._ab = [None, None]
@@ -485,12 +509,14 @@ class Player(QObject):
             LOG.write("Play & Save stopped because the video was re-opened")
         paused = self._reloading["paused"] if self._reloading is not None else self._paused
         self._reloading = {"paused": paused}
+        self._seek_target = None
         self._pending_seek = pos
         self.mp.set_media(self._make_media())
         self.mp.play()
 
     def _restart(self, seconds: float) -> None:
         """Play again after the end was reached (VLC can't seek once it has ended)."""
+        self._seek_target = None
         self._pending_seek = seconds if seconds > 0.05 else None
         self._reloading = {"paused": False}
         self.mp.stop()
@@ -509,6 +535,7 @@ class Player(QObject):
     def stop(self) -> None:
         self._reloading = None
         self._pending_seek = None
+        self._seek_target = None
         self._ab_timer.stop()
         self.mp.stop()
         self._emit("idle-active", True)
@@ -722,7 +749,10 @@ class Player(QObject):
         dur = self._duration()
         if dur:
             seconds = min(seconds, max(0.0, dur - 0.05))
-        self.mp.set_time(int(max(0.0, seconds) * 1000))
+        seconds = max(0.0, seconds)
+        self.mp.set_time(int(seconds * 1000))
+        self._seek_target = seconds
+        self._seek_at = time.monotonic()
 
     def seek(self, seconds: float, mode: str = "relative", exact: bool = True) -> None:
         cur = self._time() or 0.0

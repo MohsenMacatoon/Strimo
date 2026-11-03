@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import icons, theme
+from .controls import JumpSlider
 from .util import ASPECT_CHOICES, display_name, fmt_time, human_bitrate, human_size, is_url
 
 _USER_ROLE = int(Qt.ItemDataRole.UserRole.value)
@@ -82,8 +83,8 @@ class PlaylistPanel(QWidget):
         lay.addWidget(hint)
 
         self.loop_mode = "none"
-        self.add_btn.clicked.connect(self.add_files_requested.emit)
-        self.folder_btn.clicked.connect(self.add_folder_requested.emit)
+        self.add_btn.clicked.connect(lambda *_a: self.add_files_requested.emit())
+        self.folder_btn.clicked.connect(lambda *_a: self.add_folder_requested.emit())
         self.shuffle_btn.clicked.connect(self.shuffle)
         self.loop_btn.clicked.connect(lambda _=False: self.cycle_loop())
         self.clear_btn.clicked.connect(self.clear)
@@ -301,7 +302,7 @@ class BookmarksPanel(_TimedListPanel):
         add = small_button("plus", "Bookmark this moment (Ctrl+B)")
         ren = small_button("note", "Rename")
         dele = small_button("trash", "Delete")
-        add.clicked.connect(self.add_requested.emit)
+        add.clicked.connect(lambda *_a: self.add_requested.emit())
         ren.clicked.connect(self._rename)
         dele.clicked.connect(self._delete_selected)
         for b in (add, ren, dele):
@@ -431,7 +432,7 @@ class AdjustPanel(QWidget):
         self.sliders: dict[str, QSlider] = {}
         self.value_labels: dict[str, QLabel] = {}
         for row, (key, label) in enumerate(self.EQ):
-            s = QSlider(Qt.Orientation.Horizontal)
+            s = JumpSlider(Qt.Orientation.Horizontal)
             s.setRange(-100, 100)
             s.setValue(0)
             s.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -463,7 +464,7 @@ class AdjustPanel(QWidget):
         self.aspect.currentIndexChanged.connect(lambda _i: self._player_call("set_aspect", self.aspect.currentData()))
         form.addRow("Aspect ratio", self.aspect)
         zoom_row = QHBoxLayout()
-        self.zoom = QSlider(Qt.Orientation.Horizontal)
+        self.zoom = JumpSlider(Qt.Orientation.Horizontal)
         self.zoom.setRange(0, 200)  # hundredths of log2 zoom (100% to 400%)
         self.zoom.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.zoom.valueChanged.connect(self._zoom_changed)
@@ -479,8 +480,8 @@ class AdjustPanel(QWidget):
         zoom_row.addWidget(zoom_reset)
         form.addRow("Zoom", zoom_row)
         pan_row = QHBoxLayout()
-        self.pan_x = QSlider(Qt.Orientation.Horizontal)
-        self.pan_y = QSlider(Qt.Orientation.Horizontal)
+        self.pan_x = JumpSlider(Qt.Orientation.Horizontal)
+        self.pan_y = JumpSlider(Qt.Orientation.Horizontal)
         for s, prop in ((self.pan_x, "video-pan-x"), (self.pan_y, "video-pan-y")):
             s.setRange(-50, 50)
             s.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -519,7 +520,7 @@ class AdjustPanel(QWidget):
         sf.addRow("Track", self.sub_track)
         load = QPushButton("Load subtitle file…")
         load.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        load.clicked.connect(self.load_sub_requested.emit)
+        load.clicked.connect(lambda *_a: self.load_sub_requested.emit())
         sf.addRow(load)
         self.sub_delay = QDoubleSpinBox()
         self.sub_delay.setRange(-60, 60)
@@ -529,7 +530,7 @@ class AdjustPanel(QWidget):
         self.sub_delay.setToolTip("Keys: Z = earlier, X = later")
         self.sub_delay.valueChanged.connect(lambda v: self._set("sub-delay", v))
         sf.addRow("Delay", self.sub_delay)
-        self.sub_scale = QSlider(Qt.Orientation.Horizontal)
+        self.sub_scale = JumpSlider(Qt.Orientation.Horizontal)
         self.sub_scale.setRange(40, 300)
         self.sub_scale.setValue(int(float(cfg.get("sub_scale")) * 100))
         self.sub_scale.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -640,7 +641,7 @@ class InfoPanel(QWidget):
         r = QPushButton("Refresh")
         r.setProperty("chip", True)
         r.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        r.clicked.connect(self.refresh_requested.emit)
+        r.clicked.connect(lambda *_a: self.refresh_requested.emit())
         top.addWidget(r)
         lay.addLayout(top)
         self.form = QFormLayout()

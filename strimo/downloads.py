@@ -450,7 +450,7 @@ class DownloadsPanel(QWidget):
         add.setObjectName("primary")
         add.setIcon(icons.icon("download", "#08110f"))
         add.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        add.clicked.connect(self.add_link_requested.emit)
+        add.clicked.connect(lambda *_a: self.add_link_requested.emit())
         top.addWidget(add, 1)
         clear = QPushButton("Clear done")
         clear.setFocusPolicy(Qt.FocusPolicy.NoFocus)
