@@ -25,9 +25,8 @@ OutputBaseFilename=Strimo-Setup-{#AppVersion}{#Suffix}
 SetupIconFile=..\assets\strimo.ico
 UninstallDisplayIcon={app}\Strimo.exe
 UninstallDisplayName={#AppName}
-Compression=lzma2/max
-SolidCompression=yes
-LZMAUseSeparateProcess=yes
+Compression=lzma2/normal
+SolidCompression=no
 WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -59,6 +58,24 @@ Root: HKA; Subkey: "Software\Classes\Strimo.Media\DefaultIcon"; ValueType: strin
 Root: HKA; Subkey: "Software\Classes\Strimo.Media\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\Strimo.exe"" ""%1"""; Tasks: openwith
 Root: HKA; Subkey: "Software\Classes\Applications\Strimo.exe"; ValueType: string; ValueName: "FriendlyAppName"; ValueData: "Strimo"; Flags: uninsdeletekey; Tasks: openwith
 Root: HKA; Subkey: "Software\Classes\Applications\Strimo.exe\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\Strimo.exe"" ""%1"""; Tasks: openwith
+Root: HKA; Subkey: "Software\Classes\Strimo.Media\shell\open"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Player"; Tasks: openwith
+Root: HKA; Subkey: "Software\Classes\Applications\Strimo.exe\shell\open"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Player"; Tasks: openwith
+Root: HKA; Subkey: "Software\Classes\SystemFileAssociations\video\shell\Strimo.Play"; ValueType: string; ValueName: ""; ValueData: "Play with Strimo"; Flags: uninsdeletekey; Tasks: openwith
+Root: HKA; Subkey: "Software\Classes\SystemFileAssociations\video\shell\Strimo.Play"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\Strimo.exe,0"; Tasks: openwith
+Root: HKA; Subkey: "Software\Classes\SystemFileAssociations\video\shell\Strimo.Play"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Player"; Tasks: openwith
+Root: HKA; Subkey: "Software\Classes\SystemFileAssociations\video\shell\Strimo.Play\command"; ValueType: string; ValueName: ""; ValueData: """{app}\Strimo.exe"" ""%1"""; Tasks: openwith
+Root: HKA; Subkey: "Software\Classes\SystemFileAssociations\video\shell\Strimo.Enqueue"; ValueType: string; ValueName: ""; ValueData: "Add to Strimo playlist"; Flags: uninsdeletekey; Tasks: openwith
+Root: HKA; Subkey: "Software\Classes\SystemFileAssociations\video\shell\Strimo.Enqueue"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\Strimo.exe,0"; Tasks: openwith
+Root: HKA; Subkey: "Software\Classes\SystemFileAssociations\video\shell\Strimo.Enqueue"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Player"; Tasks: openwith
+Root: HKA; Subkey: "Software\Classes\SystemFileAssociations\video\shell\Strimo.Enqueue\command"; ValueType: string; ValueName: ""; ValueData: """{app}\Strimo.exe"" --enqueue ""%1"""; Tasks: openwith
+Root: HKA; Subkey: "Software\Classes\SystemFileAssociations\audio\shell\Strimo.Play"; ValueType: string; ValueName: ""; ValueData: "Play with Strimo"; Flags: uninsdeletekey; Tasks: openwith
+Root: HKA; Subkey: "Software\Classes\SystemFileAssociations\audio\shell\Strimo.Play"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\Strimo.exe,0"; Tasks: openwith
+Root: HKA; Subkey: "Software\Classes\SystemFileAssociations\audio\shell\Strimo.Play"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Player"; Tasks: openwith
+Root: HKA; Subkey: "Software\Classes\SystemFileAssociations\audio\shell\Strimo.Play\command"; ValueType: string; ValueName: ""; ValueData: """{app}\Strimo.exe"" ""%1"""; Tasks: openwith
+Root: HKA; Subkey: "Software\Classes\SystemFileAssociations\audio\shell\Strimo.Enqueue"; ValueType: string; ValueName: ""; ValueData: "Add to Strimo playlist"; Flags: uninsdeletekey; Tasks: openwith
+Root: HKA; Subkey: "Software\Classes\SystemFileAssociations\audio\shell\Strimo.Enqueue"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\Strimo.exe,0"; Tasks: openwith
+Root: HKA; Subkey: "Software\Classes\SystemFileAssociations\audio\shell\Strimo.Enqueue"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Player"; Tasks: openwith
+Root: HKA; Subkey: "Software\Classes\SystemFileAssociations\audio\shell\Strimo.Enqueue\command"; ValueType: string; ValueName: ""; ValueData: """{app}\Strimo.exe"" --enqueue ""%1"""; Tasks: openwith
 Root: HKA; Subkey: "Software\Classes\Directory\shell\Strimo.PlayFolder"; ValueType: string; ValueName: ""; ValueData: "Play with Strimo"; Flags: uninsdeletekey; Tasks: openwith
 Root: HKA; Subkey: "Software\Classes\Directory\shell\Strimo.PlayFolder"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\Strimo.exe,0"; Tasks: openwith
 Root: HKA; Subkey: "Software\Classes\Directory\shell\Strimo.PlayFolder\command"; ValueType: string; ValueName: ""; ValueData: """{app}\Strimo.exe"" ""%1"""; Tasks: openwith

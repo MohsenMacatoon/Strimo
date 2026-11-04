@@ -25,7 +25,7 @@ from .player import LOG, Player
 from .procs import CommandRunner, LinkResolver
 from .util import (
     ASPECT_CHOICES, MEDIA_EXTS, display_name, fmt_speed, fmt_time, folder_media_files, is_direct_media_url, is_media_file,
-    is_sub_file, is_url, normalize_url, parse_time, safe_filename, unique_path,
+    is_sub_file, is_url, natural_key, normalize_url, parse_time, safe_filename, unique_path,
 )
 from .video_widget import NativeVideoWidget, NullVideoWidget
 from .winkeys import KeyHook, focus_is_lost
@@ -532,6 +532,26 @@ class MainWindow(QMainWindow):
                 self.play_link(link)
             else:
                 self.playlist.add_entries([link])
+
+    def receive_files(self, files: list, enqueue: bool = False) -> None:
+        """Files from Explorer / another Strimo: several at once become one playlist."""
+        files = [f for f in files if f]
+        if self.isMinimized():
+            self.showNormal()
+        self.raise_()
+        self.activateWindow()
+        if not files:
+            return  # Strimo opened again with no file: just bring this window forward
+        local = [f for f in files if not is_url(f)]
+        if len(local) > 1 and len(local) == len(files):
+            files = sorted(files, key=lambda p: natural_key(os.path.basename(p)))
+        if enqueue and self.current_entry is not None:
+            self.open_paths(files, append=True)
+            self.osd(f"Added {len(files)} to the playlist" if len(files) > 1 else "Added to the playlist")
+        else:
+            self.open_paths(files)
+            if len(files) > 1:
+                self.osd(f"Playlist: {len(files)} files")
 
     def open_file_dialog(self, append: bool = False) -> None:
         start = os.path.dirname(self.current_entry) if self.current_entry and not is_url(self.current_entry) else ""

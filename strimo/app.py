@@ -63,6 +63,7 @@ def _option(argv: list[str], name: str):
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     selftest = "--selftest" in argv
+    enqueue = "--enqueue" in argv
     files = [a for a in argv if not a.startswith("--")]
     sys.excepthook = _log_exception
 
@@ -81,6 +82,14 @@ def main(argv=None) -> int:
     app.setApplicationDisplayName(APP_NAME)
     app.setApplicationVersion(__version__)
     app.setOrganizationName(APP_NAME)
+    instance = None
+    if not selftest:
+        # one Strimo at a time: extra copies (one per file selected in Explorer) hand over and exit
+        from .instance import Instance
+
+        instance = Instance()
+        if not instance.become_main_or_hand_over(files, enqueue):
+            return 0
     app.setStyle("Fusion")
     app.setPalette(_dark_palette())
     app.setStyleSheet(theme.STYLE)
@@ -116,11 +125,20 @@ def main(argv=None) -> int:
         return app.exec()
 
     cfg = Config()
-    win = MainWindow(cfg, files)
+    win = MainWindow(cfg, [])
     win.show()
+    if instance is not None:
+        instance.files_received.connect(win.receive_files)
+        if files:
+            instance.add(files, enqueue)  # waits a moment for the other selected files
+    elif files:
+        win.receive_files(files, enqueue)
     from PySide6.QtCore import QTimer
 
     from .player import LOG
 
     QTimer.singleShot(0, lambda: LOG.write(f"window ready after {(time.monotonic() - _T0) * 1000:.0f} ms"))
-    return app.exec()
+    code = app.exec()
+    if instance is not None:
+        instance.release()
+    return code
