@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 import traceback
+
+_T0 = time.monotonic()  # start-up timing for the log
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QIcon, QPalette
@@ -86,15 +89,12 @@ def main(argv=None) -> int:
         app.setWindowIcon(QIcon(icon_path))
 
     try:
-        import vlc  # noqa: F401  (loads libvlc.dll)
-
-        if not hasattr(vlc, "Instance") or vlc.dll is None:
-            raise OSError("libvlc.dll was not found")
-    except (Exception, SystemExit) as exc:  # python-vlc may call sys.exit if the dll fails
+        import mpv  # noqa: F401  (loads libmpv-2.dll)
+    except (Exception, SystemExit) as exc:
         _log_exception(type(exc), exc, exc.__traceback__)
         QMessageBox.critical(
             None, APP_NAME,
-            "Strimo's playback engine (VLC / libvlc.dll) could not be loaded.\n\n"
+            "Strimo's playback engine (libmpv-2.dll) could not be loaded.\n\n"
             "Please reinstall Strimo.\n\nDetails: " + str(exc))
         return 1
 
@@ -118,4 +118,9 @@ def main(argv=None) -> int:
     cfg = Config()
     win = MainWindow(cfg, files)
     win.show()
+    from PySide6.QtCore import QTimer
+
+    from .player import LOG
+
+    QTimer.singleShot(0, lambda: LOG.write(f"window ready after {(time.monotonic() - _T0) * 1000:.0f} ms"))
     return app.exec()

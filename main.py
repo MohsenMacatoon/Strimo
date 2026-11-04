@@ -5,7 +5,7 @@ import sys
 
 
 def _prepare_dll_search_path() -> None:
-    """Point python-vlc at the bundled libVLC (the "vlc" folder next to Strimo's files)."""
+    """Make sure libmpv-2.dll (shipped next to Strimo.exe) can be found by python-mpv."""
     if getattr(sys, "frozen", False):
         base = os.path.dirname(os.path.abspath(sys.executable))
     else:
@@ -14,14 +14,6 @@ def _prepare_dll_search_path() -> None:
     meipass = getattr(sys, "_MEIPASS", None)
     if meipass:
         dirs.append(meipass)
-    for root in list(dirs):
-        vlc_dir = os.path.join(root, "vlc")
-        if os.path.isfile(os.path.join(vlc_dir, "libvlc.dll")):
-            os.environ["PYTHON_VLC_LIB_PATH"] = os.path.join(vlc_dir, "libvlc.dll")
-            os.environ["PYTHON_VLC_MODULE_PATH"] = os.path.join(vlc_dir, "plugins")
-            os.environ["VLC_PLUGIN_PATH"] = os.path.join(vlc_dir, "plugins")
-            dirs.insert(0, vlc_dir)
-            break
     dirs = [d for d in dirs if os.path.isdir(d)]
     os.environ["PATH"] = os.pathsep.join(dirs + [os.environ.get("PATH", "")])
     if hasattr(os, "add_dll_directory"):

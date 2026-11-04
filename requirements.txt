@@ -1,2 +1,2 @@
 PySide6-Essentials>=6.6
-python-vlc>=3.0.18122,<4
+mpv>=1.0.7

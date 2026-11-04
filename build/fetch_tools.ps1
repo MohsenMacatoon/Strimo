@@ -1,4 +1,4 @@
-# Downloads the playback engine (libVLC), yt-dlp and FFmpeg into .\vendor
+# Downloads the playback engine (libmpv), yt-dlp and FFmpeg into .\vendor
 # Used by the GitHub build and by build_local.ps1.
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -6,44 +6,38 @@ Set-Location (Split-Path -Parent $PSScriptRoot)
 
 New-Item -ItemType Directory -Force vendor, vendor\tools, vendor\tmp | Out-Null
 
-# ---- libVLC (playback engine, the same engine as the VLC app) ----------------
-if (-not (Test-Path vendor\vlc\libvlc.dll)) {
-    $base = 'https://download.videolan.org/pub/videolan/vlc'
-    $versions = @()
-    try {
-        $listing = (Invoke-WebRequest -UseBasicParsing "$base/").Content
-        $versions = [regex]::Matches($listing, 'href="(3\.0\.\d+)/"') | ForEach-Object { $_.Groups[1].Value } |
-            Sort-Object { [version]$_ } -Descending -Unique
-    } catch { Write-Warning "Could not list VLC versions: $_" }
-    $versions = @($versions) + @('3.0.21', '3.0.20') | Select-Object -Unique
-    $ok = $false
-    foreach ($v in $versions) {
-        $url = "$base/$v/win64/vlc-$v-win64.7z"
-        try {
-            Write-Host "Downloading VLC $v ..."
-            Invoke-WebRequest -UseBasicParsing $url -OutFile vendor\tmp\vlc.7z
-            $ok = $true
-            break
-        } catch { Write-Warning "VLC $v not available: $_" }
-    }
-    if (-not $ok) { throw 'Could not download VLC.' }
-    & 7z x vendor\tmp\vlc.7z -ovendor\tmp\vlcx -y | Out-Null
-    $src = (Get-ChildItem vendor\tmp\vlcx -Directory | Select-Object -First 1).FullName
-    New-Item -ItemType Directory -Force vendor\vlc | Out-Null
-    Copy-Item "$src\libvlc.dll", "$src\libvlccore.dll" vendor\vlc
-    Copy-Item "$src\plugins" vendor\vlc\plugins -Recurse
-    # leave out parts Strimo never uses (VLC's own interface, scripts, visualisations ...)
-    foreach ($d in 'gui', 'lua', 'control', 'visualization', 'video_splitter', 'services_discovery', 'keystore') {
-        Remove-Item -Recurse -Force "vendor\vlc\plugins\$d" -ErrorAction SilentlyContinue
-    }
-    # plugin cache = faster start-up
-    Copy-Item "$src\vlc-cache-gen.exe" vendor\vlc
-    & vendor\vlc\vlc-cache-gen.exe vendor\vlc\plugins
-    Remove-Item vendor\vlc\vlc-cache-gen.exe
-    if (-not (Test-Path vendor\vlc\plugins\plugins.dat)) { Write-Warning 'plugins.dat was not created (start-up will be a bit slower)' }
+# ---- libmpv (playback engine) ---------------------------------------------------
+$headers = @{ 'User-Agent' = 'strimo-build' }
+if ($env:GITHUB_TOKEN) { $headers['Authorization'] = "Bearer $($env:GITHUB_TOKEN)" }
+
+function Get-Asset($repo, $pattern) {
+    $rel = Invoke-RestMethod -Headers $headers "https://api.github.com/repos/$repo/releases/latest"
+    return $rel.assets | Where-Object { $_.name -match $pattern } | Select-Object -First 1
 }
-$vlcMB = (Get-ChildItem vendor\vlc -Recurse -File | Measure-Object Length -Sum).Sum / 1MB
-Write-Host ('VLC engine: {0:N1} MB' -f $vlcMB)
+
+if (-not ((Test-Path vendor\libmpv-2.dll) -or (Test-Path vendor\mpv-2.dll))) {
+    $asset = $null
+    foreach ($repo in @('shinchiro/mpv-winbuild-cmake', 'zhongfly/mpv-winbuild')) {
+        try {
+            $asset = Get-Asset $repo '^mpv-dev-x86_64-\d{8}-git-[0-9a-f]+\.7z$'
+            if ($asset) { Write-Host "libmpv from $repo : $($asset.name)"; break }
+        } catch { Write-Warning "Could not read releases of $repo : $_" }
+    }
+    if (-not $asset) { throw 'Could not find a libmpv (mpv-dev-x86_64) download.' }
+    Invoke-WebRequest $asset.browser_download_url -OutFile vendor\tmp\mpv-dev.7z
+    & 7z x vendor\tmp\mpv-dev.7z -ovendor\tmp\mpv -y | Out-Null
+    $dll = Get-ChildItem vendor\tmp\mpv -Recurse -Filter 'libmpv-2.dll' | Select-Object -First 1
+    if (-not $dll) { $dll = Get-ChildItem vendor\tmp\mpv -Recurse -Filter 'mpv-2.dll' | Select-Object -First 1 }
+    if (-not $dll) { throw 'libmpv-2.dll was not inside the mpv-dev archive.' }
+    Copy-Item $dll.FullName vendor\libmpv-2.dll
+}
+
+# python-mpv looks for libmpv-2.dll on new versions and mpv-2.dll on older ones
+$mpvpy = (python -c "import importlib.util; print(importlib.util.find_spec('mpv').origin)").Trim()
+if ((Test-Path vendor\libmpv-2.dll) -and -not (Select-String -Path $mpvpy -Pattern 'libmpv-2.dll' -Quiet)) {
+    Write-Host 'python-mpv expects mpv-2.dll - renaming'
+    Move-Item -Force vendor\libmpv-2.dll vendor\mpv-2.dll
+}
 
 # ---- yt-dlp (link support) ---------------------------------------------------
 if (-not (Test-Path vendor\tools\yt-dlp.exe)) {

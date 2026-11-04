@@ -2,7 +2,7 @@
 
 An ad-free video player for Windows with **precise speed control**, **free rotation/flipping**, **link streaming** and a **download manager**. No ads, no tracking, no account.
 
-Playback uses VLC's engine (libVLC), so it plays everything VLC plays: MP4, MKV, AVI, MOV, WebM, FLV, TS, MP3, FLAC… Links use yt-dlp, HD downloads use FFmpeg.
+Playback uses the mpv engine, drawing straight into the window with the graphics card: it plays MP4, MKV, AVI, MOV, WebM, FLV, TS, MP3, FLAC… — almost anything. Links use yt-dlp, HD downloads use FFmpeg.
 
 ## Features
 
@@ -53,8 +53,8 @@ See **BUILD.md**. The easiest way is to let GitHub build it for free: upload thi
 main.py                 start-up (PyInstaller entry)
 strimo/                 the app
   mainwindow.py         window, menus, shortcuts, behaviour
-  player.py             VLC engine (libVLC) wrapper
-  video_widget.py       video surface (VLC draws straight into it)
+  player.py             mpv engine wrapper
+  video_widget.py       video surface (mpv draws straight into it)
   controls.py           control bar + speed popup      seekbar.py   seek bar
   panels.py             playlist, bookmarks, notes, adjust, info
   downloads.py          download manager               procs.py     yt-dlp processes

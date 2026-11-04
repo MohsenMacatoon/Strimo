@@ -1,10 +1,10 @@
 Strimo bundles the following open-source software:
 
-- VLC media player engine (libVLC + plugins, playback) — https://www.videolan.org — LGPLv2.1+ (libVLC) / GPLv2+ (some plugins)
-- FFmpeg (inside VLC's plugins, and ffmpeg.exe in the full installer) — https://ffmpeg.org — GPL builds
+- mpv / libmpv (playback engine) — https://mpv.io — GPLv2+ / LGPLv2.1+ (Windows builds by shinchiro/mpv-winbuild-cmake)
+- FFmpeg (inside libmpv, and ffmpeg.exe in the full installer) — https://ffmpeg.org — GPL builds
 - yt-dlp — https://github.com/yt-dlp/yt-dlp — The Unlicense
 - Qt 6 / PySide6 — https://www.qt.io — LGPLv3
-- python-vlc — https://github.com/oaubert/python-vlc — LGPLv2.1+
+- python-mpv — https://github.com/jaseg/python-mpv — LGPLv2.1+ / GPLv2+
 - Python — https://www.python.org — PSF License
 
 Because GPL components are included, if you publish Strimo builds to other people you must

@@ -418,7 +418,7 @@ class IntroSkipDialog(QDialog):
 
 # ============================================================== Settings
 class SettingsDialog(QDialog):
-    RESTART_KEYS = {"hwdec", "network_cache_s", "pitch_correction"}
+    RESTART_KEYS = {"hwdec", "network_cache_s"}
 
     def __init__(self, cfg, parent=None):
         super().__init__(parent)
@@ -446,7 +446,7 @@ class SettingsDialog(QDialog):
         self._check(f, "remember_speed", "Remember the speed for each file")
         self._check(f, "hold_to_boost", "Hold → to play faster (like YouTube)")
         self._dspin(f, "boost_speed", "Hold-→ speed", 1.25, 8.0, 0.25, "×")
-        self._check(f, "pitch_correction", "Keep voices natural when changing speed (after restart)")
+        self._check(f, "pitch_correction", "Keep voices natural when changing speed")
         tabs.addTab(w, "Playback")
 
         # Links & downloads
@@ -491,7 +491,7 @@ class SettingsDialog(QDialog):
         f.addRow("", data_btn)
         tabs.addTab(w, "Advanced")
 
-        note = QLabel("Link buffer, hardware decoding and pitch changes apply after restarting Strimo.")
+        note = QLabel("Link buffer and hardware decoding changes apply after restarting Strimo.")
         note.setObjectName("dim")
         note.setWordWrap(True)
         lay.addWidget(note)

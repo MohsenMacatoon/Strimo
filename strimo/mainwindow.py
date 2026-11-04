@@ -83,6 +83,7 @@ class MainWindow(QMainWindow):
         self._gl_check_timer = None
         self._runners = []
         self._poll_ticks = 0
+        self._last_cursor = None
         self._click_paused = None   # pause state before a single click (undone by a double-click)
 
         self.downloads = DownloadManager(cfg, self)
@@ -670,12 +671,25 @@ class MainWindow(QMainWindow):
     # ================================================================ player events
     def _poll(self) -> None:
         """5 times a second: position, buffered amount and frame counter."""
+        try:
+            self._poll_inner()
+        except Exception as exc:  # noqa: BLE001
+            self._poll_errors = getattr(self, "_poll_errors", 0) + 1
+            if self._poll_errors in (1, 10, 100) or self._poll_errors % 1000 == 0:
+                LOG.write(f"update failed ({self._poll_errors}x): {exc!r}")
+
+    def _poll_inner(self) -> None:
         p = self.player
         if p is None or self.current_entry is None or self._idle:
             return
         self._poll_ticks += 1
-        if self._poll_ticks % 5 == 0 and self.video is not None:
-            self.video.claim_input()          # VLC may have made a new video window
+        # extras must never stop the position updates below
+        for extra in ((self._claim_video_input,) if self._poll_ticks % 5 == 0 else ()) + (self._cursor_watch,):
+            try:
+                extra()
+            except Exception as exc:  # noqa: BLE001
+                if self._poll_ticks % 50 == 0:
+                    LOG.write(f"poll extra {getattr(extra, '__name__', extra)} failed: {exc}")
         if not self._duration:
             dur = _num_or_none(p.get("duration"))
             if dur:
@@ -690,6 +704,23 @@ class MainWindow(QMainWindow):
         self.controls.seekbar.set_buffered(_num_or_none(p.get("demuxer-cache-time")) or 0.0)
         if self.cfg.get("show_frame_counter"):
             self.controls.set_frame_text(self._frame_text())
+
+    def _claim_video_input(self) -> None:
+        """Keep clicks and keys over the video for Strimo (see video_widget.disable_child_windows)."""
+        if self.video is None:
+            return
+        if self.video.claim_input() and self.isActiveWindow():
+            # if mpv's window had keyboard focus, disabling it dropped the focus: take it back
+            self.activateWindow()
+            self.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def _cursor_watch(self) -> None:
+        """Bring hidden controls back when the mouse moves, even if no mouse event arrived."""
+        pos = QCursor.pos()
+        last, self._last_cursor = self._last_cursor, pos
+        if last is not None and pos != last and not self.controls.isVisible() and self.isActiveWindow():
+            if self.frameGeometry().contains(pos):
+                self._show_controls()
 
     def _frame_text(self) -> str:
         n = self.player.get("estimated-frame-number") if self.player else None
@@ -746,8 +777,8 @@ class MainWindow(QMainWindow):
                 self._has_video = True
                 self.video.has_video = True
                 self.video.set_placeholder(False)
-                self.video.claim_input()
-                QTimer.singleShot(300, self.video.claim_input)
+                self._claim_video_input()
+                QTimer.singleShot(300, self._claim_video_input)
         elif name == "vid":
             if (value in (False, None, "no") and self.current_entry and not self._loading
                     and not self.player.get("idle-active", True)):
@@ -970,7 +1001,7 @@ class MainWindow(QMainWindow):
     def _set_pitch(self, on: bool) -> None:
         self.cfg.set("pitch_correction", bool(on))
         self.player.set("audio-pitch-correction", bool(on))
-        self.osd("Pitch correction " + ("on" if on else "off") + " — takes effect after restarting Strimo", 2500)
+        self.osd("Pitch correction " + ("on" if on else "off"))
 
     def set_volume(self, vol: int, osd: bool = True) -> None:
         v = self.player.set_volume(vol)

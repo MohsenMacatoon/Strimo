@@ -355,26 +355,25 @@ class SelfTest(QObject):
             w.act_flip_h.setChecked(True)
             w.act_flip_v.setChecked(True)
             assert w.player.flip_h and w.player.flip_v
-            from .player import transform_type
-            assert transform_type(0, False, False) == ""
-            assert transform_type(90, False, False) == "90"
-            assert transform_type(0, True, False) == "hflip"
-            assert transform_type(0, True, True) == "180"
-            assert transform_type(90, True, False) in ("transpose", "antitranspose")
-            assert transform_type(270, False, True) in ("transpose", "antitranspose")
+            vf = str(w.player.get("vf"))
+            assert "hflip" in vf and "vflip" in vf, vf
             w.toggle_portrait()
             w.reset_orientation()
             assert int(w.player.get("video-rotate")) == 0
             assert not w.player.flip_h and not w.player.flip_v
+            assert "flip" not in str(w.player.get("vf") or "")
             self.ok("rotate 90/180/270, mirror, flip, portrait, reset")
 
-        @step("video re-opens after rotation", 1500)
+        @step("rotation is instant", 300)
         def _():
+            self._rot_pos = w.player._engine_time() or 0.0
             w.rotate(90)
 
         @step("rotation keeps playing", 200)
         def _():
-            self.check("still playing after rotation", not w._idle and (w._pos or 0) > 0.5, f"pos={w._pos}")
+            pos = w.player._engine_time() or 0.0
+            self.check("rotating doesn't restart or jump", not w._idle and int(w.player.get("video-rotate")) == 90
+                       and 0 <= pos - self._rot_pos < 2.0, f"before={self._rot_pos:.1f} after={pos:.1f}")
             w.reset_orientation()
 
         @step("aspect, zoom, picture", 300)
@@ -394,7 +393,7 @@ class SelfTest(QObject):
         @step("audio filters", 300)
         def _():
             w.act_night.setChecked(True)
-            assert w.player.night_mode, "night mode flag"
+            assert w.player.night_mode and "dynaudnorm" in str(w.player.get("af")), w.player.get("af")
             w.act_night.setChecked(False)
             self.ok("night mode")
 
