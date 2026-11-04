@@ -28,6 +28,7 @@ from .util import (
     is_sub_file, is_url, normalize_url, parse_time, safe_filename, unique_path,
 )
 from .video_widget import NativeVideoWidget, NullVideoWidget
+from .winkeys import KeyHook, focus_is_lost
 
 TAB_PLAYLIST, TAB_BOOKMARKS, TAB_NOTES, TAB_DOWNLOADS, TAB_ADJUST, TAB_INFO = range(6)
 HIDE_DELAY_MS = 2500
@@ -125,6 +126,8 @@ class MainWindow(QMainWindow):
         self.sleep_timer.timeout.connect(self._sleep_tick)
 
         QApplication.instance().installEventFilter(self)
+        # Windows: Space/arrows always reach Strimo, even if the video window holds the focus
+        self.keyhook = KeyHook(lambda: int(self.winId()), self._hook_allowed, self._hook_key, LOG.write)
 
         # ---- restore window
         self.resize(1100, 680)
@@ -451,7 +454,32 @@ class MainWindow(QMainWindow):
         return menu
 
     # ================================================================ startup
+    def _hook_allowed(self) -> bool:
+        return (QApplication.activeModalWidget() is None and QApplication.activePopupWidget() is None
+                and not self._focus_is_text())
+
+    def _hook_key(self, name: str, down: bool, shift: bool, repeat: bool) -> None:
+        if name == "space":
+            if down and not repeat:
+                self.toggle_pause()
+            return
+        key = {"left": Qt.Key.Key_Left, "right": Qt.Key.Key_Right, "up": Qt.Key.Key_Up, "down": Qt.Key.Key_Down}[name]
+        if down:
+            self._show_controls()
+            self._arrow_press(key, shift, repeat)
+        else:
+            self._arrow_release(key, shift, False)
+
+    def _repair_focus(self) -> None:
+        if self.selftest or not isinstance(self.video, NativeVideoWidget) or isinstance(self.video, NullVideoWidget):
+            return
+        if focus_is_lost(int(self.winId()), self.video.wid()):
+            self.activateWindow()
+            self.setFocus(Qt.FocusReason.OtherFocusReason)
+
     def _after_show(self) -> None:
+        if not self.selftest and self.keyhook.install():
+            LOG.write("keyboard hook on: Space and arrow keys always reach Strimo")
         if self.cfg.get("always_on_top"):
             self._apply_window_flags()
         if self._pending_args:
@@ -684,7 +712,8 @@ class MainWindow(QMainWindow):
             return
         self._poll_ticks += 1
         # extras must never stop the position updates below
-        for extra in ((self._claim_video_input,) if self._poll_ticks % 5 == 0 else ()) + (self._cursor_watch,):
+        for extra in ((self._claim_video_input,) if self._poll_ticks % 5 == 0 else ()) + (
+                self._cursor_watch, self._repair_focus):
             try:
                 extra()
             except Exception as exc:  # noqa: BLE001
@@ -1761,6 +1790,7 @@ class MainWindow(QMainWindow):
         if self._resolver is not None:
             self._resolver.cancel()
         QApplication.instance().removeEventFilter(self)
+        self.keyhook.uninstall()
         if self.video is not None:
             self.video.free_context()
         if self.player is not None:
