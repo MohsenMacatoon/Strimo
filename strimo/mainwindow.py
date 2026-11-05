@@ -84,6 +84,8 @@ class MainWindow(QMainWindow):
         self._gl_check_timer = None
         self._runners = []
         self._poll_ticks = 0
+        self._receive_until = 0.0
+        self._fail_streak = 0
         self._last_cursor = None
         self._click_paused = None   # pause state before a single click (undone by a double-click)
 
@@ -542,10 +544,30 @@ class MainWindow(QMainWindow):
         self.activateWindow()
         if not files:
             return  # Strimo opened again with no file: just bring this window forward
+        if len(files) > 1:
+            # many files: keep only video/audio (a selection may include pictures, documents...)
+            files = [f for f in files if is_url(f) or os.path.isdir(f) or is_media_file(f)]
+            if not files:
+                self.osd("None of those files are video or audio")
+                return
         local = [f for f in files if not is_url(f)]
         if len(local) > 1 and len(local) == len(files):
             files = sorted(files, key=lambda p: natural_key(os.path.basename(p)))
-        if enqueue and self.current_entry is not None:
+        now = time.monotonic()
+        # with a big selection the files arrive in several groups: later groups extend the playlist
+        continuing = (not enqueue and self.current_entry is not None and now < self._receive_until)
+        self._receive_until = now + 4.0
+        if continuing:
+            self.playlist.add_entries(files)
+            entries = self.playlist.entries()
+            if all(not is_url(e) for e in entries):
+                cur = self.current_entry
+                entries.sort(key=lambda p: natural_key(os.path.basename(p)))
+                self.playlist.set_entries(entries, entries.index(cur) if cur in entries else -1)
+                if entries and entries[0] != cur and (self._pos or 0.0) < 3.0:
+                    self.play_index(0)  # still the first seconds: start from the real first file
+            self.osd(f"Playlist: {self.playlist.count()} files")
+        elif enqueue and self.current_entry is not None:
             self.open_paths(files, append=True)
             self.osd(f"Added {len(files)} to the playlist" if len(files) > 1 else "Added to the playlist")
         else:
@@ -703,7 +725,7 @@ class MainWindow(QMainWindow):
                 # maybe mpv can still play it directly
                 self.player.play(url)
             else:
-                self._show_error(msg)
+                self._skip_or_show(msg)
 
         resolver.resolved.connect(resolved)
         resolver.failed.connect(failed)
@@ -848,6 +870,7 @@ class MainWindow(QMainWindow):
     def _on_file_loaded(self) -> None:
         entry = self.current_entry
         self._loading = False
+        self._fail_streak = 0
         self._idle = False
         if entry is None:
             return
@@ -897,7 +920,22 @@ class MainWindow(QMainWindow):
         if self._resolver is not None:
             return
         name = display_name(self.current_entry) if self.current_entry else ""
-        self._show_error(f"{msg}\n{name}")
+        self._skip_or_show(f"{msg}\n{name}")
+
+    def _skip_or_show(self, msg: str) -> None:
+        """A file that can't play: go on to the next one (like VLC), or show why if it was the last."""
+        idx = self.playlist.current_index()
+        if idx >= 0:
+            self.playlist.mark_failed(idx)
+        self._fail_streak += 1
+        nxt = self.playlist.next_index(wrap=self.cfg.get("loop_mode") == "all")
+        if nxt >= 0 and nxt != idx and self._fail_streak < self.playlist.count():
+            LOG.write(f"skipped, can't play: {self.current_entry}")
+            name = display_name(self.current_entry) if self.current_entry else "file"
+            QTimer.singleShot(150, lambda n=nxt: self.play_index(n))
+            QTimer.singleShot(400, lambda: self.osd(f"Skipped (can't play): {name}", 2500))
+            return
+        self._show_error(msg)
 
     def _on_eof(self) -> None:
         if self.current_entry:

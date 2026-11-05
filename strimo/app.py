@@ -82,14 +82,6 @@ def main(argv=None) -> int:
     app.setApplicationDisplayName(APP_NAME)
     app.setApplicationVersion(__version__)
     app.setOrganizationName(APP_NAME)
-    instance = None
-    if not selftest:
-        # one Strimo at a time: extra copies (one per file selected in Explorer) hand over and exit
-        from .instance import Instance
-
-        instance = Instance()
-        if not instance.become_main_or_hand_over(files, enqueue):
-            return 0
     app.setStyle("Fusion")
     app.setPalette(_dark_palette())
     app.setStyleSheet(theme.STYLE)
@@ -127,18 +119,17 @@ def main(argv=None) -> int:
     cfg = Config()
     win = MainWindow(cfg, [])
     win.show()
-    if instance is not None:
-        instance.files_received.connect(win.receive_files)
-        if files:
-            instance.add(files, enqueue)  # waits a moment for the other selected files
-    elif files:
-        win.receive_files(files, enqueue)
+    # files handed over by other Strimo copies (see instance.py) arrive through the inbox
+    from .inbox import Inbox
+
+    inbox = Inbox()
+    inbox.files_received.connect(win.receive_files)
+    if files:
+        inbox.add(files, enqueue)  # waits a moment for the other files selected with it
+    inbox.start()
     from PySide6.QtCore import QTimer
 
     from .player import LOG
 
     QTimer.singleShot(0, lambda: LOG.write(f"window ready after {(time.monotonic() - _T0) * 1000:.0f} ms"))
-    code = app.exec()
-    if instance is not None:
-        instance.release()
-    return code
+    return app.exec()

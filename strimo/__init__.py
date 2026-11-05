@@ -2,4 +2,4 @@
 
 APP_NAME = "Strimo"
 APP_ID = "Strimo.Player"
-__version__ = "2.0.2"
+__version__ = "2.0.5"

@@ -231,17 +231,20 @@ class Player(QObject):
 
     # ------------------------------------------------------------ basic access
     def version(self) -> str:
-        try:
-            return str(self.m["mpv-version"])
-        except Exception:  # noqa: BLE001
-            return "?"
+        return str(self._raw("mpv-version", "?"))
 
+    # NOTE: python-mpv's player["name"] reads/writes mpv's *start-up options*, not the
+    # live properties (playback position, pause state, idle state...). Live properties
+    # are attributes: player.time_pos, player.pause = True. Always go through these two.
     def _raw(self, name, default=None):
         try:
-            value = self.m[name]
+            value = getattr(self.m, name.replace("-", "_"))
         except Exception:  # noqa: BLE001
             return default
         return default if value is None else value
+
+    def _put(self, name, value) -> None:
+        setattr(self.m, name.replace("-", "_"), value)
 
     def _engine_time(self):
         t = self._raw("time-pos")
@@ -273,7 +276,7 @@ class Player(QObject):
             self.set_speed(float(value))
             return True
         try:
-            self.m[name] = value
+            self._put(name, value)
             return True
         except Exception as exc:  # noqa: BLE001
             LOG.write(f"set {name}={value!r} failed: {exc}")
@@ -350,7 +353,7 @@ class Player(QObject):
         s = round_speed(speed)
         self._speed = s
         try:
-            self.m["speed"] = s
+            self._put("speed", s)
         except Exception as exc:  # noqa: BLE001
             LOG.write(f"speed failed: {exc}")
         return s
@@ -394,7 +397,7 @@ class Player(QObject):
     def set_aspect(self, choice: str) -> None:
         self.set("panscan", 1.0 if choice == "fill" else 0.0)
         self.set("keepaspect", choice != "stretch")
-        self.set("video-aspect-override", "-1" if choice in ("auto", "stretch", "fill") else choice)
+        self.set("video-aspect-override", "no" if choice in ("auto", "stretch", "fill") else choice)
 
     def set_night_mode(self, on: bool) -> None:
         self.night_mode = bool(on)

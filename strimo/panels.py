@@ -154,6 +154,12 @@ class PlaylistPanel(QWidget):
                 self.list.scrollToItem(it)
         self._update_count()
 
+    def mark_failed(self, index: int) -> None:
+        it = self.list.item(index)
+        if it is not None and not it.text().startswith("⚠"):
+            it.setText("⚠  " + it.text())
+            it.setToolTip("Couldn't play this file\n" + str(it.data(ROLE_ENTRY)))
+
     def next_index(self, wrap: bool) -> int:
         i, n = self.current_index(), self.list.count()
         if n == 0:

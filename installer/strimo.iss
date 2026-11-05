@@ -58,6 +58,8 @@ Root: HKA; Subkey: "Software\Classes\Strimo.Media\DefaultIcon"; ValueType: strin
 Root: HKA; Subkey: "Software\Classes\Strimo.Media\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\Strimo.exe"" ""%1"""; Tasks: openwith
 Root: HKA; Subkey: "Software\Classes\Applications\Strimo.exe"; ValueType: string; ValueName: "FriendlyAppName"; ValueData: "Strimo"; Flags: uninsdeletekey; Tasks: openwith
 Root: HKA; Subkey: "Software\Classes\Applications\Strimo.exe\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\Strimo.exe"" ""%1"""; Tasks: openwith
+; Windows only opens up to 15 selected files with Enter/"Open"; raise that limit for this user
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Explorer"; ValueType: dword; ValueName: "MultipleInvokePromptMinimum"; ValueData: "100000"; Flags: uninsdeletevalue; Tasks: openwith
 Root: HKA; Subkey: "Software\Classes\Strimo.Media\shell\open"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Player"; Tasks: openwith
 Root: HKA; Subkey: "Software\Classes\Applications\Strimo.exe\shell\open"; ValueType: string; ValueName: "MultiSelectModel"; ValueData: "Player"; Tasks: openwith
 Root: HKA; Subkey: "Software\Classes\SystemFileAssociations\video\shell\Strimo.Play"; ValueType: string; ValueName: ""; ValueData: "Play with Strimo"; Flags: uninsdeletekey; Tasks: openwith

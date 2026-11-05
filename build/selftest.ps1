@@ -32,5 +32,7 @@ try {
 if (Test-Path $report) { Get-Content $report } else { Write-Warning 'no report was written' }
 $log = Join-Path $env:APPDATA 'Strimo\strimo.log'
 if (Test-Path $log) { Write-Host '---- strimo.log ----'; Get-Content $log -Tail 80 }
-if ($code -ne 0) { throw "Self-test failed (exit code $code)" }
+$failed = (Test-Path $report) -and (Select-String -Path $report -Pattern '\[FAIL\]' -Quiet)
+if (-not (Test-Path $report)) { throw 'Self-test failed (no report)' }
+if ($failed -or $code -ne 0) { throw "Self-test failed (exit code $code)" }
 Write-Host 'Self-test passed.'

@@ -24,6 +24,13 @@ def _prepare_dll_search_path() -> None:
                 pass
 
 
+# Many files opened from Explorer = many copies of Strimo starting at once. If one is
+# already running, hand our files to it right away - before loading Qt or the engine.
+from strimo.instance import hand_over_if_running  # noqa: E402
+
+if hand_over_if_running(sys.argv[1:]):
+    sys.exit(0)
+
 _prepare_dll_search_path()
 
 from strimo.app import main  # noqa: E402
