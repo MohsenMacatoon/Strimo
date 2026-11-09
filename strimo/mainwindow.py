@@ -22,10 +22,11 @@ from .dialogs import (
 from .downloads import DownloadManager, DownloadsPanel
 from .panels import AdjustPanel, BookmarksPanel, InfoPanel, NotesPanel, PlaylistPanel
 from .player import LOG, Player
-from .procs import CommandRunner, LinkResolver
+from .procs import CommandRunner, LinkResolver, kill_tree
+from .explorer_order import sort_like_explorer
 from .util import (
     ASPECT_CHOICES, MEDIA_EXTS, display_name, fmt_speed, fmt_time, folder_media_files, is_direct_media_url, is_media_file,
-    is_sub_file, is_url, natural_key, normalize_url, parse_time, safe_filename, unique_path,
+    is_sub_file, is_url, normalize_url, parse_time, safe_filename, unique_path,
 )
 from .video_widget import NativeVideoWidget, NullVideoWidget
 from .winkeys import KeyHook, focus_is_lost
@@ -77,6 +78,7 @@ class MainWindow(QMainWindow):
         self._last_backend_switch = -1e9
         self._loading = False
         self._record_path = None
+        self._big_buffer_for = None
         self._press_pos = None
         self._drag_offset = None
         self._dragged = False
@@ -229,6 +231,7 @@ class MainWindow(QMainWindow):
         player.file_loaded.connect(self._on_file_loaded)
         player.load_failed.connect(self._on_load_failed)
         player.render_error.connect(self._render_error)
+        player.stream_not_seekable.connect(self._on_stream_not_seekable)
         LOG.write(f"video backend: {self.backend}")
 
     def _connect_controls(self) -> None:
@@ -552,7 +555,7 @@ class MainWindow(QMainWindow):
                 return
         local = [f for f in files if not is_url(f)]
         if len(local) > 1 and len(local) == len(files):
-            files = sorted(files, key=lambda p: natural_key(os.path.basename(p)))
+            files = sort_like_explorer(files)
         now = time.monotonic()
         # with a big selection the files arrive in several groups: later groups extend the playlist
         continuing = (not enqueue and self.current_entry is not None and now < self._receive_until)
@@ -562,7 +565,7 @@ class MainWindow(QMainWindow):
             entries = self.playlist.entries()
             if all(not is_url(e) for e in entries):
                 cur = self.current_entry
-                entries.sort(key=lambda p: natural_key(os.path.basename(p)))
+                entries = sort_like_explorer(entries)
                 self.playlist.set_entries(entries, entries.index(cur) if cur in entries else -1)
                 if entries and entries[0] != cur and (self._pos or 0.0) < 3.0:
                     self.play_index(0)  # still the first seconds: start from the real first file
@@ -616,9 +619,9 @@ class MainWindow(QMainWindow):
         self.cfg.add_link(link)
         if dlg.action == "download":
             title = (dlg.info or {}).get("title", "")
-            self.downloads.add(link, dlg.chosen_quality, dlg.subs.isChecked(), title)
+            item = self.downloads.add(link, dlg.chosen_quality, dlg.subs.isChecked(), title)
             self.show_panel(TAB_DOWNLOADS)
-            self.osd("Added to downloads")
+            self.osd("Already downloaded - it's in your download folder" if item.status == "done" else "Added to downloads")
         else:
             self.play_link(link, quality=dlg.chosen_quality, record=dlg.action == "record")
 
@@ -670,6 +673,7 @@ class MainWindow(QMainWindow):
         self._intro_rule = self.cfg.get_intro(entry)
         self._intro_done = False
         self._record_path = None
+        self._big_buffer_for = None
         self.controls.reset_time()
         self.controls.seekbar.set_marks([])
         self.controls.seekbar.set_intro(self._intro_rule)
@@ -697,7 +701,9 @@ class MainWindow(QMainWindow):
             if rec:
                 self.osd("Playing and saving a copy")
             return
-        fmt = ytdl.single_file_format(quality) if record else ytdl.stream_format(quality)
+        # Play & Save records picture and sound joined into one source, so the normal
+        # (best quality) formats work for it too
+        fmt = ytdl.stream_format(quality)
         resolver = LinkResolver(url, fmt, self)
         self._resolver = resolver
 
@@ -711,8 +717,8 @@ class MainWindow(QMainWindow):
             target = info.get("video_url") or url
             rec = self._record_target(title) if record else None
             self._record_path = rec
-            self.player.play(target, audio_url=None if record else info.get("audio_url"),
-                             headers=info.get("headers"), title=title, record_path=rec)
+            self.player.play(target, audio_url=info.get("audio_url"), headers=info.get("headers"),
+                             title=title, record_path=rec, join_audio=bool(rec))
             if rec:
                 self.osd("Playing and saving a copy")
 
@@ -722,8 +728,10 @@ class MainWindow(QMainWindow):
             self._resolver = None
             LOG.write(f"yt-dlp could not resolve {url}: {msg}")
             if "isn't supported" in msg:
-                # maybe mpv can still play it directly
-                self.player.play(url)
+                # maybe mpv can still play it directly (and still keep the copy for Play & Save)
+                rec = self._record_target(display_name(url).rsplit(".", 1)[0]) if record else None
+                self._record_path = rec
+                self.player.play(url, record_path=rec)
             else:
                 self._skip_or_show(msg)
 
@@ -922,6 +930,32 @@ class MainWindow(QMainWindow):
         name = display_name(self.current_entry) if self.current_entry else ""
         self._skip_or_show(f"{msg}\n{name}")
 
+    def _on_stream_not_seekable(self) -> None:
+        """The server can't jump inside the file ("no range support") and the file keeps its
+        index at the end. mpv can only play it by holding the whole file in memory."""
+        entry = self.current_entry
+        if not entry or not is_url(entry) or self.player is None:
+            return
+        if self._big_buffer_for == entry:
+            # messages from the first try can still arrive after the reload: only give up if
+            # the video really doesn't move
+            start = self._pos or 0.0
+
+            def give_up(entry=entry, start=start):
+                if (self.current_entry == entry and not self._paused and (self._pos or 0.0) <= start + 0.3
+                        and not self._loading):
+                    LOG.write(f"server can't stream this file even with a big buffer: {entry}")
+                    self._skip_or_show("This server doesn't allow streaming this video.\nUse Download to save it first.")
+
+            QTimer.singleShot(5000, give_up)
+            return
+        self._big_buffer_for = entry
+        size = _num_or_none(self.player.get("file-size")) or 0
+        mib = int(min(512, max(32, size / 2 ** 20 * 1.1 + 8)))
+        LOG.write(f"server can't seek in {entry}; reloading with a {mib} MiB buffer")
+        if self.player.reload({"stream-buffer-size": f"{mib}MiB"}):
+            self.osd("This server can't stream normally - loading the whole video…", 3000)
+
     def _skip_or_show(self, msg: str) -> None:
         """A file that can't play: go on to the next one (like VLC), or show why if it was the last."""
         idx = self.playlist.current_index()
@@ -931,13 +965,21 @@ class MainWindow(QMainWindow):
         nxt = self.playlist.next_index(wrap=self.cfg.get("loop_mode") == "all")
         if nxt >= 0 and nxt != idx and self._fail_streak < self.playlist.count():
             LOG.write(f"skipped, can't play: {self.current_entry}")
-            name = display_name(self.current_entry) if self.current_entry else "file"
-            QTimer.singleShot(150, lambda n=nxt: self.play_index(n))
-            QTimer.singleShot(400, lambda: self.osd(f"Skipped (can't play): {name}", 2500))
+            failed = self.current_entry
+            name = display_name(failed) if failed else "file"
+
+            def go_on(n=nxt, failed=failed):
+                if self.current_entry == failed:   # unless the user picked something else meanwhile
+                    self.play_index(n)
+                    QTimer.singleShot(250, lambda: self.osd(f"Skipped (can't play): {name}", 2500))
+
+            QTimer.singleShot(150, go_on)
             return
         self._show_error(msg)
 
     def _on_eof(self) -> None:
+        if self._loading:
+            return  # the end of a file the user already left
         if self.current_entry:
             self.cfg.set_position(self.current_entry, None)
         if self._sleep and self._sleep["mode"] == "file":
@@ -1842,7 +1884,7 @@ class MainWindow(QMainWindow):
         self.downloads.shutdown()
         for r in list(self._runners):
             try:
-                r.proc.kill()
+                kill_tree(r.proc)
             except Exception:  # noqa: BLE001
                 pass
         if self._resolver is not None:

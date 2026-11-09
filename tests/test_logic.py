@@ -167,6 +167,46 @@ def test_ytdl_parse_info():
     assert info["video_url"] == "https://file.mp4" and info["audio_url"] is None
     playlist = {"_type": "playlist", "entries": [None, single]}
     assert ytdl.parse_info(json.dumps(playlist))["title"] == "Direct"
+    # many sites don't name the audio codec: the sound must still be used
+    unknown = {"title": "X", "requested_formats": [
+        {"url": "https://v.m3u8", "vcodec": "avc1", "acodec": "none"},
+        {"url": "https://a.m3u8", "vcodec": "none", "acodec": None}]}
+    info = ytdl.parse_info(json.dumps(unknown))
+    assert info["video_url"] == "https://v.m3u8" and info["audio_url"] == "https://a.m3u8"
+    nocodecs = {"title": "Y", "requested_formats": [{"url": "https://v"}, {"url": "https://a", "vcodec": "none"}]}
+    info = ytdl.parse_info(json.dumps(nocodecs))
+    assert info["video_url"] == "https://v" and info["audio_url"] == "https://a"
+
+
+def test_ytdl_download_names_and_audio():
+    args = ytdl.download_args("https://x", "720", "out", "tmp", "C:/ff/ffmpeg.exe")
+    assert args[args.index("-o") + 1] == ytdl.OUTPUT_TEMPLATE and "%(height& {}p|)s" in ytdl.OUTPUT_TEMPLATE
+    m4a = ytdl.download_format_args("audio_m4a", True)
+    assert "-x" in m4a and m4a[m4a.index("--audio-format") + 1] == "m4a"
+    assert "-x" not in ytdl.download_format_args("audio_m4a", False)
+
+
+def test_explorer_order():
+    from strimo import explorer_order as eo
+
+    d = tempfile.mkdtemp()
+    names = ["ep10.mp4", "ep2.mp3", "Ep1.webm", "b.mkv"]
+    paths_ = []
+    for i, n in enumerate(names):
+        p = os.path.join(d, n)
+        with open(p, "wb") as f:
+            f.write(b"x" * (10 * (i + 1)))
+        os.utime(p, (1_000_000 + i, 1_000_000 + i))
+        paths_.append(p)
+    base = lambda lst: [os.path.basename(x) for x in lst]  # noqa: E731
+    assert base(eo.sort_like_explorer(paths_, columns=[])) == ["b.mkv", "Ep1.webm", "ep2.mp3", "ep10.mp4"]
+    newest = eo.parse_sort_columns("prop:-System.DateModified;")
+    assert newest == [("System.DateModified", True)]
+    assert base(eo.sort_like_explorer(paths_, columns=newest)) == names[::-1]   # newest first
+    assert base(eo.sort_like_explorer(paths_, columns=eo.parse_sort_columns("System.Size;"))) == names
+    assert eo.parse_group("System.Null") is None
+    assert eo.parse_group("System.DateModified") == ("System.DateModified", True)
+    assert eo.parse_group("prop:System.ItemNameDisplay") == ("System.ItemNameDisplay", False)
 
 
 if __name__ == "__main__":

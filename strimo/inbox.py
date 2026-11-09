@@ -29,6 +29,14 @@ class Inbox(QObject):
         self._poll.timeout.connect(self._check)
 
     def start(self) -> None:
+        # half-written leftovers of a copy that was killed while handing over
+        try:
+            for n in os.listdir(inbox_dir()):
+                p = os.path.join(inbox_dir(), n)
+                if n.endswith(".tmp") and time.time() - os.path.getmtime(p) > STALE_S:
+                    os.remove(p)
+        except OSError:
+            pass
         self._check()
         self._poll.start()
 

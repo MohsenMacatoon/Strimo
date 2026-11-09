@@ -43,6 +43,7 @@ Name: "openwith"; Description: "Add Strimo to ""Open with"" for video and audio 
 [Files]
 Source: "..\dist\Strimo\*"; DestDir: "{app}"; Excludes: "tools\*"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\vendor\tools\yt-dlp.exe"; DestDir: "{app}\tools"; Flags: ignoreversion
+Source: "..\vendor\tools\qjs.exe"; DestDir: "{app}\tools"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "..\THIRD_PARTY_NOTICES.txt"; DestDir: "{app}"; Flags: ignoreversion
 #ifndef LITE
 Source: "..\vendor\tools\ffmpeg.exe"; DestDir: "{app}\tools"; Flags: ignoreversion
@@ -165,6 +166,54 @@ Root: HKA; Subkey: "Software\Classes\.opus\OpenWithProgids"; ValueType: string; 
 Root: HKA; Subkey: "Software\Classes\.wav\OpenWithProgids"; ValueType: string; ValueName: "Strimo.Media"; ValueData: ""; Flags: uninsdeletevalue; Tasks: openwith
 Root: HKA; Subkey: "Software\Classes\.wma\OpenWithProgids"; ValueType: string; ValueName: "Strimo.Media"; ValueData: ""; Flags: uninsdeletevalue; Tasks: openwith
 Root: HKA; Subkey: "Software\Classes\.wv\OpenWithProgids"; ValueType: string; ValueName: "Strimo.Media"; ValueData: ""; Flags: uninsdeletevalue; Tasks: openwith
+; Lets Strimo be chosen in Settings > Apps > Default apps (search "Strimo")
+Root: HKA; Subkey: "Software\Strimo"; Flags: uninsdeletekeyifempty; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities"; ValueType: string; ValueName: "ApplicationName"; ValueData: "Strimo"; Flags: uninsdeletekey; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities"; ValueType: string; ValueName: "ApplicationDescription"; ValueData: "Ad-free video and music player"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities"; ValueType: string; ValueName: "ApplicationIcon"; ValueData: "{app}\Strimo.exe,0"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".3g2"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".3gp"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".asf"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".avi"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".divx"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".f4v"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".flv"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".m2ts"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".m4v"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".mkv"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".mov"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".mp4"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".mpeg"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".mpg"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".mts"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".mxf"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".ogv"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".rm"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".rmvb"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".ts"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".vob"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".webm"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".wmv"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".xvid"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".aac"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".ac3"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".aif"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".aiff"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".alac"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".amr"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".ape"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".dts"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".flac"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".m4a"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".mka"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".mp3"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".oga"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".ogg"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".opus"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".wav"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".wma"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\Strimo\Capabilities\FileAssociations"; ValueType: string; ValueName: ".wv"; ValueData: "Strimo.Media"; Tasks: openwith
+Root: HKA; Subkey: "Software\RegisteredApplications"; ValueType: string; ValueName: "Strimo"; ValueData: "Software\Strimo\Capabilities"; Flags: uninsdeletevalue; Tasks: openwith
 
 [Run]
 Filename: "{app}\Strimo.exe"; Description: "Start Strimo now"; Flags: nowait postinstall skipifsilent

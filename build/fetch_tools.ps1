@@ -45,6 +45,17 @@ if (-not (Test-Path vendor\tools\yt-dlp.exe)) {
 }
 & vendor\tools\yt-dlp.exe --version
 
+# ---- QuickJS (small JavaScript engine: YouTube needs one for yt-dlp to see all formats) ----
+if (-not (Test-Path vendor\tools\qjs.exe)) {
+    try {
+        Invoke-WebRequest 'https://github.com/quickjs-ng/quickjs/releases/latest/download/qjs-windows-x86_64.exe' -OutFile vendor\tools\qjs.exe
+        & vendor\tools\qjs.exe -e "console.log('QuickJS ok')"
+    } catch {
+        Write-Warning "QuickJS download failed ($_) - YouTube may offer fewer formats"
+        Remove-Item vendor\tools\qjs.exe -ErrorAction SilentlyContinue
+    }
+}
+
 # ---- FFmpeg (joins video+audio for HD downloads, MP3 conversion) -------------
 if (-not (Test-Path vendor\tools\ffmpeg.exe)) {
     try {

@@ -13,6 +13,7 @@ import os
 from . import paths
 
 PROGRESS_TAG = "STRIMO|"
+OUTPUT_TEMPLATE = "%(title).120B [%(id)s]%(height& {}p|)s.%(ext)s"
 FILE_TAG = "STRIMOFILE|"
 TITLE_TAG = "STRIMOTITLE|"
 
@@ -70,6 +71,8 @@ def download_format_args(quality: str, has_ffmpeg: bool) -> list[str]:
             return ["-f", "bestaudio/best", "-x", "--audio-format", "mp3", "--audio-quality", "0"]
         quality = "audio_m4a"
     if quality == "audio_m4a":
+        if has_ffmpeg:  # some sites send AAC sound in an .mp4 box: make it a real .m4a
+            return ["-f", "bestaudio[ext=m4a]/bestaudio/best", "-x", "--audio-format", "m4a"]
         return ["-f", "bestaudio[ext=m4a]/bestaudio/best"]
     h = _height(quality)
     if has_ffmpeg:
@@ -81,8 +84,15 @@ def download_format_args(quality: str, has_ffmpeg: bool) -> list[str]:
 
 
 # ---------------------------------------------------------------- commands
+def js_runtime_args() -> list[str]:
+    """YouTube needs a JavaScript engine for yt-dlp to see all formats. Strimo ships the small
+    QuickJS (tools\\qjs.exe); a Deno next to yt-dlp.exe or on PATH is found by yt-dlp itself."""
+    qjs = paths.find_tool("qjs")
+    return ["--js-runtimes", f"quickjs:{qjs}"] if qjs else []
+
+
 def base_args() -> list[str]:
-    return ["--no-colors", "--no-playlist", "--no-warnings", "--encoding", "utf-8"]
+    return ["--no-colors", "--no-playlist", "--no-warnings", "--encoding", "utf-8"] + js_runtime_args()
 
 
 def info_args(url: str, fmt: str | None = None) -> list[str]:
@@ -120,7 +130,8 @@ def download_args(
         "--socket-timeout", "30",
         "-P", out_dir,
         "-P", f"temp:{temp_dir}",
-        "-o", "%(title).150B [%(id)s].%(ext)s",
+        # e.g. "Title [id] 720p.mp4"; the quality is left out when unknown or for audio
+        "-o", OUTPUT_TEMPLATE,
         "--progress-template", progress,
         "--print", "before_dl:" + TITLE_TAG + "%(title)s",
         "--print", "after_move:" + FILE_TAG + "%(filepath)s",
@@ -213,17 +224,17 @@ def parse_info(json_text: str) -> dict:
     headers = dict(info.get("http_headers") or {})
     video_url = None
     audio_url = None
-    req = info.get("requested_formats")
+    req = [f for f in (info.get("requested_formats") or []) if f and f.get("url")]
     if req:
-        for f in req:
-            if f.get("vcodec") not in (None, "none") and not video_url:
-                video_url = f.get("url")
-                headers.update(f.get("http_headers") or {})
-            elif f.get("acodec") not in (None, "none") and not audio_url:
-                audio_url = f.get("url")
-        if not video_url and req:
-            video_url = req[0].get("url")
-            audio_url = None
+        # picture = the format that isn't marked "no video"; sound = the other one. Many sites
+        # don't say which audio codec they use (acodec missing), so don't rely on it.
+        video = next((f for f in req if f.get("vcodec") != "none"), req[0])
+        video_url = video.get("url")
+        headers.update(video.get("http_headers") or {})
+        audio = next((f for f in req if f is not video and f.get("vcodec") == "none"), None)
+        if audio is None:
+            audio = next((f for f in req if f is not video), None)
+        audio_url = audio.get("url") if audio else None
     else:
         video_url = info.get("url")
     heights = sorted(

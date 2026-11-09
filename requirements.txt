@@ -1,2 +1,3 @@
 PySide6-Essentials>=6.6
 mpv>=1.0.7
+comtypes>=1.2

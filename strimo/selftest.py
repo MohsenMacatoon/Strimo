@@ -520,7 +520,34 @@ class SelfTest(QObject):
                 self.ok("direct link playback", "skipped (no url)")
                 return
             w.play_link(self.url)
-            self.wait_for("direct http link plays", lambda: (w._duration or 0) > 1 and w.current_entry == self.url, 20)
+            # really playing (the test server can't jump inside files: Strimo must cope with that)
+            self.wait_for("direct http link plays", lambda: (w._pos or 0) > 1.0 and w.current_entry == self.url, 40)
+
+        @step("direct link seek", 200)
+        def _():
+            if not self.url:
+                return
+            w.seek_to(20.0, osd=False)
+            self.wait_for("seeking inside a link works", lambda: 19.5 <= (w.player.get("time-pos") or 0) < 25, 20)
+
+        @step("play and save", 200)
+        def _():
+            if not self.url:
+                return
+            w.play_link(self.url, record=True)
+            self.wait_for("Play & Save plays", lambda: (w._pos or 0) > 3.0 and bool(w._record_path), 40)
+
+        @step("play and save result", 300)
+        def _():
+            rec = w._record_path
+            w.stop()
+            self._rec = rec
+
+        @step("play and save file", 100)
+        def _():
+            rec = getattr(self, "_rec", None)
+            size = os.path.getsize(rec) if rec and os.path.exists(rec) else 0
+            self.check("Play & Save wrote a copy", size > 20_000, f"{rec} {size} bytes")
 
         @step("yt-dlp resolves a link", 200)
         def _():
@@ -542,6 +569,30 @@ class SelfTest(QObject):
             self.check("yt-dlp info has a playable url", bool(self._resolved.get("video_url")),
                        str(self._resolved)[:300])
 
+        @step("yt-dlp JavaScript engine", 200)
+        def _():
+            if not ytdl.ytdlp_path() or not ytdl.js_runtime_args():
+                self.ok("YouTube JavaScript engine", "skipped (qjs not bundled here)")
+                self._js = ""
+                return
+            from .procs import CommandRunner
+
+            self._js = None
+            r = CommandRunner(["-v", *ytdl.js_runtime_args(), "--simulate", "--no-warnings", "--",
+                               self.url or "http://127.0.0.1:9/"], self)
+            r.done.connect(lambda code, out: setattr(self, "_js", out))
+            r.start()
+            self._js_runner = r
+            self.wait_for("yt-dlp ran with the JavaScript engine", lambda: self._js is not None, 60)
+
+        @step("yt-dlp JavaScript engine result", 100)
+        def _():
+            out = self._js or ""
+            if not out:
+                return
+            line = next((ln for ln in out.splitlines() if "JS runtimes" in ln), "")
+            self.check("YouTube JavaScript engine found by yt-dlp", "quickjs" in line.lower(), line or out[-300:])
+
         @step("download manager", 200)
         def _():
             if not self.url or not ytdl.ytdlp_path():
@@ -557,6 +608,11 @@ class SelfTest(QObject):
                 return
             ok = item.status == "done" and item.filepath and os.path.exists(item.filepath)
             self.check("downloaded file exists", bool(ok), f"{item.status} {item.error} {item.filepath}")
+            folder = os.path.normcase(os.path.abspath(w.cfg.get("download_dir") or ""))
+            where = os.path.normcase(os.path.dirname(os.path.abspath(item.filepath or "")))
+            self.check("download is in the download folder", ok and where == folder, f"{where} vs {folder}")
+            again = w.downloads.add(self.url, "720")
+            self.check("same link again is recognised (no data used)", again is item, f"{again.status}")
 
         @step("stop", 300)
         def _():

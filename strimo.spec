@@ -15,7 +15,7 @@ a = Analysis(
     pathex=[ROOT],
     binaries=mpv_dlls,
     datas=[("assets/strimo.ico", "assets"), ("assets/strimo.png", "assets")],
-    hiddenimports=["mpv"],
+    hiddenimports=["mpv", "comtypes", "comtypes.client", "comtypes.automation"],
     excludes=["tkinter", "unittest", "pydoc", "vlc", "PySide6.QtNetwork", "PySide6.QtQml", "PySide6.QtQuick",
               "PySide6.QtPdf", "PySide6.QtSql", "PySide6.QtTest", "PySide6.QtXml", "PySide6.QtDBus",
               "PySide6.QtOpenGLWidgets"],

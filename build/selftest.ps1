@@ -22,6 +22,7 @@ $report = Join-Path $work 'report.txt'
 try {
     $p = Start-Process 'dist\Strimo\Strimo.exe' -PassThru -ArgumentList @(
         '--selftest', "--selftest-media=$video", '--selftest-url=http://127.0.0.1:8765/test.mp4', "--selftest-report=$report")
+    $null = $p.Handle   # keep the process handle, otherwise ExitCode comes back empty
     if (-not $p.WaitForExit(300000)) { $p.Kill(); throw 'self-test hung (5 minutes)' }
     $code = $p.ExitCode
 } finally {
@@ -32,7 +33,7 @@ try {
 if (Test-Path $report) { Get-Content $report } else { Write-Warning 'no report was written' }
 $log = Join-Path $env:APPDATA 'Strimo\strimo.log'
 if (Test-Path $log) { Write-Host '---- strimo.log ----'; Get-Content $log -Tail 80 }
-$failed = (Test-Path $report) -and (Select-String -Path $report -Pattern '\[FAIL\]' -Quiet)
 if (-not (Test-Path $report)) { throw 'Self-test failed (no report)' }
-if ($failed -or $code -ne 0) { throw "Self-test failed (exit code $code)" }
+if (Select-String -Path $report -Pattern '\[FAIL\]' -Quiet) { throw 'Self-test failed (see the [FAIL] lines above)' }
+if ($null -ne $code -and $code -ne 0) { throw "Self-test failed (exit code $code)" }
 Write-Host 'Self-test passed.'

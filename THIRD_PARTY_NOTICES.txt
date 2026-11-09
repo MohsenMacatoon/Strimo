@@ -3,6 +3,8 @@ Strimo bundles the following open-source software:
 - mpv / libmpv (playback engine) — https://mpv.io — GPLv2+ / LGPLv2.1+ (Windows builds by shinchiro/mpv-winbuild-cmake)
 - FFmpeg (inside libmpv, and ffmpeg.exe in the full installer) — https://ffmpeg.org — GPL builds
 - yt-dlp — https://github.com/yt-dlp/yt-dlp — The Unlicense
+- QuickJS-NG (JavaScript engine yt-dlp uses for YouTube) — https://github.com/quickjs-ng/quickjs — MIT
+- comtypes (reads File Explorer's sort order) — https://github.com/enthought/comtypes — MIT
 - Qt 6 / PySide6 — https://www.qt.io — LGPLv3
 - python-mpv — https://github.com/jaseg/python-mpv — LGPLv2.1+ / GPLv2+
 - Python — https://www.python.org — PSF License

@@ -10,10 +10,12 @@ VIDEO_EXTS = {
     "mp4", "m4v", "mkv", "webm", "avi", "mov", "wmv", "flv", "f4v", "mpg", "mpeg",
     "m2v", "ts", "m2ts", "mts", "3gp", "3g2", "ogv", "vob", "divx", "xvid", "rm",
     "rmvb", "asf", "y4m", "mxf", "hevc", "h264", "h265", "av1", "ivf",
+    "ogm", "mk3d", "m2t", "tp", "trp", "wtv", "dvr-ms", "mod", "tod", "dv", "qt", "nut", "mj2",
 }
 AUDIO_EXTS = {
     "mp3", "m4a", "aac", "flac", "wav", "ogg", "oga", "opus", "wma", "alac", "aiff",
     "aif", "ape", "mka", "ac3", "dts", "amr", "mid", "midi", "wv",
+    "m4b", "weba", "mp2", "mpga", "spx", "caf", "tta", "dsf", "dff", "aifc", "au", "mpc", "eac3",
 }
 SUB_EXTS = {"srt", "ass", "ssa", "vtt", "sub", "idx", "sup", "smi", "txt"}
 STREAM_EXTS = {"m3u8", "mpd"}

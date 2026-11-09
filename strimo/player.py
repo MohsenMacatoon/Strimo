@@ -73,6 +73,7 @@ class Player(QObject):
     file_loaded = Signal()
     load_failed = Signal(str)
     render_error = Signal(str)
+    stream_not_seekable = Signal()   # server can't jump inside the file (see MainWindow)
 
     def __init__(self, cfg, backend: str = "native", wid: int | None = None, null_output: bool = False):
         super().__init__()
@@ -86,6 +87,9 @@ class Player(QObject):
         self._speed = 1.0
         self._seek_target = None   # newest requested seek, until mpv reports it
         self._seek_at = 0.0
+        self._last_play = None     # arguments of the last play(), for reload()
+        self._linear_reported = False
+        self._entry_id = None      # mpv's id for the file Strimo opened last
         t0 = time.monotonic()
 
         # libmpv requires the C numeric locale
@@ -131,7 +135,7 @@ class Player(QObject):
             opts.update(vo="gpu-next,gpu", wid=str(int(wid or 0)))
 
         str_opts = {k: _opt(v) for k, v in opts.items()}
-        self.m = mpv.MPV(log_handler=self._on_log, loglevel="warn", **str_opts)
+        self.m = self._create_mpv(str_opts)
         self._default_ua = str_opts["user_agent"]
         if not null_output:
             # newer mpv: let clicks pass through mpv's window to Strimo's
@@ -146,6 +150,28 @@ class Player(QObject):
         LOG.write(f"Strimo {__version__} started with mpv {self.version()} "
                   f"({(time.monotonic() - t0) * 1000:.0f} ms)")
 
+    # options Strimo can't run without; anything else is skipped if this libmpv lacks it
+    REQUIRED_OPTIONS = ("vo", "ao", "wid", "idle", "keep_open")
+
+    def _create_mpv(self, str_opts: dict):
+        """Start libmpv. A newer/older libmpv may not know every option: skip those instead of
+        crashing on start (the build always fetches the newest libmpv)."""
+        opts = dict(str_opts)
+        for _ in range(len(opts) + 1):
+            try:
+                return mpv.MPV(log_handler=self._on_log, loglevel="warn", **opts)
+            except AttributeError as exc:  # python-mpv: ('mpv option does not exist', -5, (handle, b'name', b'value'))
+                bad = None
+                try:
+                    bad = exc.args[2][1].decode("utf-8", "replace").replace("-", "_")
+                except Exception:  # noqa: BLE001
+                    pass
+                if not bad or bad not in opts or bad in self.REQUIRED_OPTIONS:
+                    raise
+                LOG.write(f"mpv option {bad!r} not supported by this libmpv - skipped")
+                opts.pop(bad)
+        raise RuntimeError("could not start libmpv")
+
     # ------------------------------------------------------------ callbacks (mpv thread)
     def _on_prop(self, name, value):
         if not self._closed:
@@ -153,8 +179,13 @@ class Player(QObject):
 
     def _on_log(self, level, component, message):
         LOG.write(f"[{level}] {component}: {message}")
-        if level in ("error", "fatal") and component.startswith(("vo", "gpu", "d3d11")) and not self._closed:
+        if self._closed:
+            return
+        if level in ("error", "fatal") and component.startswith(("vo", "gpu", "d3d11")):
             self.render_error.emit(message.strip())
+        elif "Cannot seek backward in linear streams" in message and not self._linear_reported:
+            self._linear_reported = True
+            self.stream_not_seekable.emit()
 
     @staticmethod
     def _event_info(ev):
@@ -214,6 +245,18 @@ class Player(QObject):
                     return eid, norm_reason(holder["reason"])
         return eid, None
 
+    @staticmethod
+    def _event_entry_id(ev):
+        """mpv's playlist entry id carried by a start-file / end-file event (or None)."""
+        try:
+            data = ev.data
+            v = getattr(data, "playlist_entry_id", None)
+            if v is None and isinstance(data, dict):
+                v = data.get("playlist_entry_id")
+            return int(v) if v is not None else None
+        except Exception:  # noqa: BLE001
+            return None
+
     def _on_event(self, ev):
         if self._closed:
             return
@@ -227,6 +270,10 @@ class Player(QObject):
         elif eid == EV_START_FILE:
             self.file_started.emit()
         elif eid == EV_END_FILE and reason == END_REASON_ERROR:
+            entry = self._event_entry_id(ev)
+            if entry and self._entry_id and entry != self._entry_id:
+                LOG.write(f"ignored a late error from an earlier file (entry {entry}, now {self._entry_id})")
+                return  # a file the user already left: not the one playing now
             self.load_failed.emit("Strimo couldn't open this file or link.")
 
     # ------------------------------------------------------------ basic access
@@ -294,10 +341,25 @@ class Player(QObject):
         self.cmd("show-text", text, ms)
 
     # ------------------------------------------------------------ playback
-    def play(self, target: str, audio_url=None, headers=None, title=None, record_path=None) -> None:
+    @staticmethod
+    def joined_source(video_url: str, audio_url: str) -> str:
+        """One source made of separate picture and sound links (mpv EDL). Unlike an extra
+        audio file, both parts are recorded by Play & Save."""
+        parts = []
+        for u in (video_url, audio_url):
+            parts.append(f"!new_stream;!no_clip;!no_chapters;%{len(u.encode('utf-8'))}%{u}")
+        return "edl://" + ";".join(parts)
+
+    def play(self, target: str, audio_url=None, headers=None, title=None, record_path=None,
+             join_audio: bool = False, file_opts: dict | None = None) -> None:
         self._seek_target = None
+        self._linear_reported = False
+        self._last_play = dict(target=target, audio_url=audio_url, headers=headers, title=title,
+                               record_path=record_path, join_audio=join_audio)
         self.cmd("change-list", "audio-files", "clr", "")
-        if audio_url:
+        if audio_url and join_audio:
+            target = self.joined_source(target, audio_url)
+        elif audio_url:
             self.cmd("change-list", "audio-files", "append", audio_url)
         self.cmd("change-list", "http-header-fields", "clr", "")
         ua = None
@@ -316,8 +378,35 @@ class Player(QObject):
         self.set("referrer", ref or "")
         self.set("force-media-title", title or "")
         self.set("stream-record", record_path or "")
-        self.cmd("loadfile", target, "replace")
+        self._entry_id = None
+        if file_opts:
+            opts = ",".join(f"{k}={v}" for k, v in file_opts.items())
+            # mpv 0.38+: loadfile <url> <flags> <index> <options>; older: loadfile <url> <flags> <options>
+            if not self._loadfile(target, "replace", -1, opts):
+                self._loadfile(target, "replace", opts)
+        else:
+            self._loadfile(target, "replace")
         self.set("pause", False)
+
+    def _loadfile(self, *args) -> bool:
+        try:
+            result = self.m.command("loadfile", *[str(a) for a in args])
+        except Exception as exc:  # noqa: BLE001
+            LOG.write(f"command loadfile {args!r} failed: {exc}")
+            return False
+        if isinstance(result, dict) and result.get("playlist_entry_id") is not None:
+            try:
+                self._entry_id = int(result["playlist_entry_id"])
+            except (TypeError, ValueError):
+                pass
+        return True
+
+    def reload(self, file_opts: dict | None = None) -> bool:
+        """Open the current source again (same picture/sound/headers), with extra mpv options."""
+        if not self._last_play:
+            return False
+        self.play(**self._last_play, file_opts=file_opts)
+        return True
 
     def stop(self) -> None:
         self._seek_target = None

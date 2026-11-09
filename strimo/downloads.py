@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import threading
 import time
 import uuid
 
@@ -16,7 +17,7 @@ from PySide6.QtWidgets import (
 
 from . import icons, paths, ytdl
 from .procs import kill_tree, make_process
-from .util import display_name, fmt_time, human_size, human_speed
+from .util import display_name, fmt_time, human_size, human_speed, unique_path
 
 
 class DownloadItem:
@@ -28,7 +29,7 @@ class DownloadItem:
         self.title = title
         self.quality = quality
         self.subs = subs
-        self.status = "queued"  # queued | downloading | paused | failed | done | canceled
+        self.status = "queued"  # queued | downloading | saving | paused | failed | done | canceled
         self.downloaded = 0.0
         self.total = None
         self.speed = None
@@ -38,6 +39,7 @@ class DownloadItem:
         self.added = time.time()
         self.part = 1
         self.phase = ""
+        self.dest_dir = ""
         self._stop = None
         self._last_dl = 0.0
 
@@ -71,6 +73,8 @@ class DownloadManager(QObject):
     item_removed = Signal(object)
     item_done = Signal(object)
     state_changed = Signal()
+    _moved = Signal(object, str, str)   # from the saving thread: item, final path, error
+    _move_lock = threading.Lock()       # one file at a time, so two equal names can't collide
 
     def __init__(self, cfg, parent=None):
         super().__init__(parent)
@@ -81,18 +85,29 @@ class DownloadManager(QObject):
         self._buf = b""
         self._err = b""
         self._last_emit = 0.0
+        self._movers: list[threading.Thread] = []
+        self._moved.connect(self._on_moved)
         for d in cfg.get("downloads", []) or []:
             try:
                 item = DownloadItem.from_dict(d)
             except Exception:  # noqa: BLE001
                 continue
-            if item.status in ("downloading", "queued"):
+            if item.status in ("downloading", "queued", "saving"):
                 item.status = "paused"  # never start using data on its own after a restart
             if item.status != "canceled" and item.url:
                 self.items.append(item)
 
     # ---- public ---------------------------------------------------------
+    def find_done(self, url: str, quality: str, subs: bool = False):
+        """An earlier download of the same link at the same quality whose file still exists."""
+        return next((i for i in self.items if i.url == url and i.quality == quality and bool(i.subs) == bool(subs)
+                     and i.status == "done" and i.filepath and os.path.exists(i.filepath)), None)
+
     def add(self, url: str, quality: str, subs: bool = False, title: str = "") -> DownloadItem:
+        same = self.find_done(url, quality, subs)
+        if same is not None:
+            self.item_changed.emit(same)   # already on disk: don't spend data on it again
+            return same
         item = DownloadItem(url, quality, subs, title)
         self.items.append(item)
         self.item_added.emit(item)
@@ -101,6 +116,8 @@ class DownloadManager(QObject):
         return item
 
     def pause(self, item: DownloadItem) -> None:
+        if item.status == "saving":
+            return  # only takes a moment
         if item is self.active and self.proc is not None:
             item._stop = "pause"
             kill_tree(self.proc)
@@ -116,6 +133,8 @@ class DownloadManager(QObject):
             self._pump()
 
     def cancel(self, item: DownloadItem) -> None:
+        if item.status == "saving":
+            return  # the finished file is being moved into the download folder
         if item is self.active and self.proc is not None:
             item._stop = "cancel"
             kill_tree(self.proc)
@@ -152,6 +171,8 @@ class DownloadManager(QObject):
             self.proc.waitForFinished(3000)
             item.status = "paused"
             self.active = None
+        for t in list(self._movers):   # let finished files reach the download folder
+            t.join(30)
         self._save()
 
     # ---- internals ---------------------------------------------------------
@@ -184,16 +205,21 @@ class DownloadManager(QObject):
             return
         out_dir = self.cfg.get("download_dir") or paths.default_download_dir()
         temp_dir = os.path.join(paths.parts_dir(), item.id)
+        # yt-dlp finishes the file in this item's own folder; Strimo then moves it into the
+        # download folder under a free name. (Saving straight into the download folder made
+        # yt-dlp skip a download whenever a file with the same name was already there.)
+        done_dir = self._done_dir(item)
+        item.dest_dir = out_dir
         try:
             os.makedirs(out_dir, exist_ok=True)
-            os.makedirs(temp_dir, exist_ok=True)
+            os.makedirs(done_dir, exist_ok=True)
         except OSError as exc:
             item.status = "failed"
             item.error = f"Can't write to the download folder: {exc}"
             self._changed(item, force=True)
             return
         args = ytdl.download_args(
-            item.url, item.quality, out_dir, temp_dir, ytdl.ffmpeg_path(),
+            item.url, item.quality, done_dir, temp_dir, ytdl.ffmpeg_path(),
             int(self.cfg.get("speed_limit_kb") or 0), bool(item.subs), self.cfg.get("sub_langs"),
         )
         self.active = item
@@ -295,17 +321,94 @@ class DownloadManager(QObject):
             self._pump()
             return
         elif code == 0:
-            item.status = "done"
-            if item.total:
-                item.downloaded = item.total
-            self._discard_parts(item)
-            self.item_done.emit(item)
+            self._start_saving(item)
+            self._save()
+            self._pump()
+            return
         else:
             item.status = "failed"
             item.error = ytdl.last_error(self._err.decode("utf-8", "replace"))
         self._changed(item, force=True)
         self._save()
         self._pump()
+
+
+    # ---- moving the finished file into the download folder ---------------------
+    @staticmethod
+    def _done_dir(item: DownloadItem) -> str:
+        return os.path.join(paths.parts_dir(), item.id, "done")
+
+    def _start_saving(self, item: DownloadItem) -> None:
+        src_dir = self._done_dir(item)
+        try:
+            files = [os.path.join(src_dir, n) for n in os.listdir(src_dir)]
+        except OSError:
+            files = []
+        files = [f for f in files if os.path.isfile(f) and not f.endswith((".part", ".ytdl", ".temp"))]
+        main = item.filepath if item.filepath and os.path.isfile(item.filepath) else None
+        if main is None or os.path.normcase(os.path.dirname(os.path.abspath(main))) != os.path.normcase(os.path.abspath(src_dir)):
+            media = [f for f in files if not f.lower().endswith((".srt", ".vtt", ".ass", ".lrc", ".json", ".jpg", ".png", ".webp"))]
+            main = max(media or files, key=os.path.getsize) if (media or files) else None
+        if main is None:
+            item.status = "failed"
+            item.error = "The download finished, but the file wasn't found. Press ▶ to try again."
+            self._changed(item, force=True)
+            return
+        item.status = "saving"
+        item.phase = ""
+        if item.total:
+            item.downloaded = item.total
+        self._changed(item, force=True)
+        dest = getattr(item, "dest_dir", None) or self.cfg.get("download_dir") or paths.default_download_dir()
+        t = threading.Thread(target=self._move_files, args=(item, main, files, dest), daemon=True)
+        self._movers.append(t)
+        t.start()
+
+    def _move_files(self, item: DownloadItem, main: str, files: list[str], dest_dir: str) -> None:
+        """Runs in a helper thread (a big file to another drive takes a while)."""
+
+        def move(src: str, dst: str) -> None:
+            try:
+                os.replace(src, dst)        # same drive: instant
+            except OSError:
+                tmp = dst + ".partial"      # other drive: copy, then rename (never a half file)
+                shutil.copyfile(src, tmp)
+                os.replace(tmp, dst)
+                os.remove(src)
+
+        try:
+            with self._move_lock:
+                os.makedirs(dest_dir, exist_ok=True)
+                stem = os.path.splitext(os.path.basename(main))[0]
+                final = unique_path(os.path.join(dest_dir, os.path.basename(main)))
+                new_stem = os.path.splitext(os.path.basename(final))[0]
+                move(main, final)
+                for f in files:
+                    if f == main or not os.path.isfile(f):
+                        continue
+                    name = os.path.basename(f)
+                    if name.startswith(stem):
+                        name = new_stem + name[len(stem):]   # keep subtitles named like the video
+                    move(f, unique_path(os.path.join(dest_dir, name)))
+            self._moved.emit(item, final, "")
+        except OSError as exc:
+            self._moved.emit(item, "", str(exc))
+        finally:
+            me = threading.current_thread()
+            if me in self._movers:
+                self._movers.remove(me)
+
+    def _on_moved(self, item: DownloadItem, final: str, error: str) -> None:
+        if error:
+            item.status = "failed"
+            item.error = f"Couldn't save it in the download folder ({error}). Press ▶ to try again."
+        else:
+            item.status = "done"
+            item.filepath = final
+            self._discard_parts(item)
+            self.item_done.emit(item)
+        self._changed(item, force=True)
+        self._save()
 
 
 # =============================================================== panel
@@ -408,6 +511,8 @@ class DownloadRow(QFrame):
                 text = " · ".join(bits)
         elif it.status == "queued":
             text = "Waiting in queue…"
+        elif it.status == "saving":
+            text = "Saving to your download folder…"
         elif it.status == "paused":
             text = f"Paused at {size}{total} — press ▶ to continue" if it.downloaded else "Paused — press ▶ to start"
         elif it.status == "failed":
@@ -419,7 +524,7 @@ class DownloadRow(QFrame):
         self.status.setText(text)
 
         active = it.status in ("downloading", "queued")
-        self.action_btn.setVisible(it.status != "done")
+        self.action_btn.setVisible(it.status not in ("done", "saving"))
         self.action_btn.setIcon(icons.icon("pause" if active else "resume"))
         self.action_btn.setToolTip("Pause" if active else ("Retry" if it.status == "failed" else "Resume"))
         self.play_btn.setVisible(it.status == "done" and bool(it.filepath))
